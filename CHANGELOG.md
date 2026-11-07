@@ -4,6 +4,98 @@ All notable changes to the serial-port modules (`SERIAL_PORT_VBA.bas` and
 `No-Debug/SERIAL_PORT_VBA_NO_DEBUG.bas`) are documented here. Unless a change is marked
 *(main module only)*, it was applied identically to both modules.
 
+## [2026-11-07] — Follow-up fixes
+
+### Fixed
+
+- **Settings.** The cleaner replaces commas with spaces only when the string contains `=`, so `9600,N,8,1` now
+  works; a new helper clears `fErrorChar`/`fNull`/`fAbortOnError` and sets XON=17/XOFF=19 only when the two chars
+  are equal; the settings path also sets `fBinary` and sets/clears `fParity` from PARITY (`BuildCommDCB` leaves
+  `fParity` clear, so parity errors were not reported); the no-settings path only touches the DCB if one of those
+  three flags is set, and a failure there does not fail the start and re-reads the DCB so the stored copy stays
+  accurate.
+- **Guard.** `PORT_LEAVE` is the first statement after `Clean_Exit:` in all guarded functions so a logging
+  failure cannot leave the guard stuck; `START_COM_PORT` closes a port it opened itself after a trapped error
+  and clears Err at entry; `STOP_PORT_CORE` clears Name/Handle when CloseHandle fails with INVALID_HANDLE (6) so
+  an entry cannot be wedged (No-Debug: captures `Err.LastDllError` locally and `PURGE_BUFFERS` moved into the
+  success branch); `DRAIN_PORT_OUTPUT` polls the queue once more after the last sleep; cleanup that runs inside an
+  active error handler moved to helpers with their own handlers, so a second error cannot escape from it.
+  *(Main module only:)* START preserves the configure `DLL_Error` across `STOP_PORT_CORE`, `DEBUG_COM_PORT` guards
+  its port-valid test, and `PRINT_DEBUG_TEXT` can no longer raise.
+- **Data path.** `SEND_COM_PORT` rejects error values and arrays and reads Range values; the
+  `TRANSMIT_PORT_CORE` text parameter is `ByVal`, and `PUT_COM_PORT`/core fail without sending when text converts
+  to more bytes than characters (double-byte code pages only; on a single-byte code page an unmappable character
+  is still sent as a substitute such as `?`, so use `TRANSMIT_BYTES` when exact bytes matter);
+  `SYNCHRONOUS_READ_COM_PORT` reads through a byte
+  buffer and keeps only bytes received; `RECEIVE_BYTES` arms its error handler first, leaves the array untouched
+  on a busy rejection and probes the array before consuming data; `Max_Bytes` is exact in both receive
+  functions; `RECEIVE_COM_PORT` tests the limit right after accumulating and skips the sleep, and a new shared
+  sleep helper clamps waits to the remaining `Total_MilliSeconds`; `SET_PORT_VALUES` caps loop waits at about
+  2048 bytes of line time (no change below 230400 baud); `TRANSMIT_BYTES` fails if the array changes during a
+  yield.
+- **Diagnostics** *(main module only)*. `DEVICE_NOT_READY` is 21 (was 15); `TEXT_US` is plain ASCII " uS" so
+  the module is pure ASCII; `HEX_8000`/`HEX_C000` fixed to long literals and `SHOW_PORT_DCB` row 24 is
+  "Bits 15-31"; `SHOW_PORT_ERRORS` shows only the error history when `ClearCommError` fails.
+
+### Added
+
+- **`PORT_LAST_ERROR(Port)`** returns the Win32 error from the most recent native call on the port (0 = success,
+  -1 = invalid port), so a failed read can be told apart from no data. The No-Debug module now records native
+  errors per port to support it.
+
+### Changed
+
+- **Graceful stop no longer discards data and reports success (behaviour change).** `STOP_COM_PORT(Port, Drain)`
+  used to purge and close after a drain timeout and return `True`. It now returns `False` and leaves the port open
+  with nothing discarded, so the caller can retry or abort with no drain time. A cancel request during the wait
+  still forces the abort close. `STOP_COM_PORT(Port)` is unchanged.
+- **`RECEIVE_COM_PORT` waits for a reply (behaviour change).** Its inactivity window now starts at the call, as in
+  `RECEIVE_BYTES`. It used to run from the last data ever received, so a transmit followed by a receive could
+  return empty even if the reply arrived 20 mS later. Empty polls now take as long as the read exit timer.
+- **Short settings strings now take effect (behaviour change).** Settings of 1-4 characters used to be ignored,
+  with the start succeeding on the existing settings. They now reach `BuildCommDCB`: `9600` applies, and strings
+  it rejects, such as `abc`, `8N1` or `COM1`, make `START_COM_PORT` return `False`.
+- `Port_Number` on the guarded public functions and the numeric options (`Drain_MilliSeconds`,
+  `Wait_MilliSeconds`, `Number_Characters`, `Max_Bytes`, `Total_MilliSeconds`) are `ByVal`. Callers passing
+  variables are no longer aliased across yields; source compatible.
+- `DRAIN_PORT_OUTPUT` and the `SYNCHRONOUS_WRITE_COM_PORT` retry loop now yield through `DoEvents`. The write loop
+  re-verifies state after the yield. The drain loop re-checks cancel only, not handle identity.
+- A text transmit that has written every byte returns `True` even if a cancel arrives afterwards, matching
+  `TRANSMIT_BYTES`.
+- **Parity and Ribbon.** Public aliases added so helper calls compile with either module (main: `Port_Ready`,
+  `Port_Valid`; No-Debug: `Port_Started`, `Port_Number_Valid`, `GET_HOST_MILLISECONDS`;
+  `CONVERT_PARITY`/`CONVERT_STOPBITS` public in No-Debug). This does not make the modules fully interchangeable:
+  the `SHOW_*` functions and other main-only public helpers do not exist in No-Debug, `PUT_COM_PORT`'s parameter
+  is named differently, and `DEBUG_COM_PORT`'s port number is optional only in No-Debug. Ribbon module-level message/result variables are now local to each Sub, and the
+  Stop/Read/Check callbacks show a specific "port busy" message (Stop: "Port busy: cancel requested, click Stop
+  again").
+
+### Docs
+
+- Corrected: `CLEAR_PORT_BUSY` helps in break mode only (a VBE Reset or `End` loses the stored handle while the
+  OS port stays open, so the host application must be closed); retry `STOP_COM_PORT` after returning from the
+  callback, never in a loop inside it; the operation guard is independent per port but a long nested operation
+  on one port suspends the outer operation on another.
+- Receive wording: time limit returns at inactivity or the limit, whichever comes first; `read_com_port` maximum
+  is the smaller of about baud/10 and 4096; `Max_Bytes` footnote updated for the exact limit.
+- `VBA_Error` documented as main module only.
+- Settings documented: short strings such as `9600`, comma form `9600,N,8,1`, `key=value` cleaning, and
+  unrecognised strings failing the start.
+- Ribbon How-To tab name corrected to "COM Port 1".
+
+### How this was tested
+
+Both modules compile clean in Excel 16 with the Ribbon module. A throwaway harness (not part of this repo) ran
+them against a temporary file handle: `ReadFile` and `WriteFile` were real, `BuildCommDCB` was real, and
+`GetCommState`, `SetCommState`, `SetCommTimeouts`, `ClearCommError` and `EscapeCommFunction` were stubbed. No COM
+port was opened.
+
+**Untested on hardware:** the drain-timeout result, the DCB flag changes on both settings paths, short and comma settings on a real port,
+the drain loop against a real queue, real `ClearCommError` paths, cancellation under live traffic, STOP after a
+real `INVALID_HANDLE`, the receive wait caps at high baud, and everything on 64-bit Office. The double-byte
+rejection cannot trigger on this single-byte test host, and the Ribbon callbacks were compiled but not run because
+they show message boxes.
+
 ## [2026-07-23] — Hardening revision
 
 Driven by an independent verification & validation review (20 findings: 2 critical, 22 high,
@@ -70,11 +162,12 @@ headless smoke tests (`SERIAL_PORT_TEST_MAIN.xlsm` / `SERIAL_PORT_TEST_NODEBUG.x
   put, get, check, signal, RTS, and the state-mutating show functions — claims the port for one
   operation. A re-entrant call on the same port (timer, event, Ribbon callback, nested macro)
   is rejected with the function's normal failure value instead of corrupting the operation in
-  progress. Ports are independent. Guarded public functions call private cores
+  progress. The guard is independent per port, but a long nested operation on one port suspends the outer operation on another. Guarded public functions call private cores
   (`STOP_PORT_CORE`, `TRANSMIT_PORT_CORE`) rather than other guarded publics.
 - **Cooperative cancellation** (`CANCEL_COM_PORT`). Long operations check for cancel after
   every yield and unwind cleanly, preserving partial data. `STOP_COM_PORT` on a busy port
-  automatically requests cancel and returns `False` for retry.
+  automatically requests cancel and returns `False`; retry after returning from the callback (for
+  example with `Application.OnTime`), never in a loop inside the callback.
 - **Post-yield state verification** (`OPERATION_INTERRUPTED`). After every `DoEvents`, long
   operations re-verify cancel state and handle identity; if the port was closed or restarted
   underneath them they stop touching it immediately.
@@ -100,7 +193,7 @@ headless smoke tests (`SERIAL_PORT_TEST_MAIN.xlsm` / `SERIAL_PORT_TEST_NODEBUG.x
 - **Runtime error handling everywhere.** `On Error GoTo Clean_Exit` with a single cleanup path
   (guard release included) on every public entry point that touches the port or converts input
   — 30+ handlers per module. Trapped errors are recorded per port (`VBA_Error`, separate from
-  the Win32 `DLL_Error`) and reported as the function's normal failure value. Logging helpers
+  the Win32 `DLL_Error`; main module only, the No-Debug module has neither) and reported as the function's normal failure value. Logging helpers
   (`TIMESTAMP`, `PRINT_SHOW_TEXT`, `DECODE_PORT_ERRORS`) use safe fallbacks so a failure inside
   logging can never cascade.
 - **Busy-safe status readers.** `DEVICE_READY`, `DEVICE_CALLING`, `CLEAR_TO_SEND`,
@@ -108,7 +201,8 @@ headless smoke tests (`SERIAL_PORT_TEST_MAIN.xlsm` / `SERIAL_PORT_TEST_NODEBUG.x
   port is idle — a worksheet/timer status poll can never clobber an in-flight operation's
   state, and still returns the true signal.
 - **Recovery and introspection.** `Port_Busy(Port)` queries the guard; `CLEAR_PORT_BUSY(Port)`
-  recovers from a VBE Ctrl-Break/Reset that bypassed cleanup.
+  recovers from a VBE Ctrl-Break (break mode only) that bypassed cleanup. A VBE Reset or `End` loses the
+  stored handle while the OS port stays open, so the host application must be closed to release it.
 - **Compile test workbooks.** `SERIAL_PORT_TEST_MAIN.xlsm` and `SERIAL_PORT_TEST_NODEBUG.xlsm`
   hold each module imported and compiled on Office 16.0 (separate projects — the modules share
   public names and must never be loaded together).

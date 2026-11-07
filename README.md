@@ -91,13 +91,21 @@ handler or Ribbon callback can call back into the module while an operation is s
 therefore has a non-blocking operation guard:
 
 * A second call on the **same** port while one is active is rejected cleanly (returns `False`, an empty
-  string, or `-1`) instead of corrupting the operation in progress. Different ports stay independent.
+  string, or `-1`) instead of corrupting the operation in progress. The guard is independent per port, but a long
+  nested operation on one port (for example a callback that runs a long receive) suspends the outer operation
+  on another port until it returns.
 * `port_busy(1)` tests the guard; `cancel_com_port(1)` asks a long receive/transmit/wait to unwind cleanly
   at its next check, keeping any partial data.
 * `stop_com_port(1)` on a busy port automatically requests cancellation and returns `False` — call it again
-  once the operation has unwound. `stop_com_port(1, 2000)` drains the transmit queue (graceful close) before
-  closing; the default remains an abort close.
-* `clear_port_busy(1)` is a recovery-only escape hatch after a VBE Ctrl-Break/Reset.
+  once the operation has unwound: retry after returning from the callback, for example with `Application.OnTime`,
+  never in a loop inside the callback. `stop_com_port(1, 2000)` drains the transmit queue (graceful close) before
+  closing. If data is still queued after that time it returns `False` and leaves the port open with nothing
+  discarded, so you can retry or abort. The default remains an abort close.
+* `port_last_error(1)` returns the Win32 error from the most recent native call on the port, so a failed read can
+  be told apart from no data.
+* `clear_port_busy(1)` is a recovery-only escape hatch after a VBE Ctrl-Break (break mode only). A VBE Reset or
+  `End` loses the stored port handle while the OS port stays open, so the host application must be closed to
+  release it.
 * `port_error_history(1)` returns hardware error bits (overflow/overrun/parity/framing/break) accumulated by
   status polling, so no error evidence is lost between checks.
 
@@ -112,7 +120,9 @@ therefore has a non-blocking operation guard:
 * Extensive debug functionality makes several modules quite verbose. 
 
 * Runtime errors are trapped at every public entry point, recorded per port, and reported as the function's
-  normal failure value — no unhandled VBA error escapes to the caller.
+  normal failure value. The one exception is a failure while building the error report itself, such as running
+  out of memory. Win32 errors are available from `port_last_error` in both modules; the per-port `VBA_Error`
+  record is in the main module only.
 
 </p>
 </details>  

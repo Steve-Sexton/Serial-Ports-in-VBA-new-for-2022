@@ -40,7 +40,7 @@ Private Const LONG_7  As Long = 7
 Private Const LONG_8  As Long = 8
 Private Const LONG_9  As Long = 9
 Private Const LONG_10 As Long = 10
-Private Const LONG_14 As Long = 14
+Private Const LONG_16 As Long = 16
 Private Const LONG_18 As Long = 18
 Private Const LONG_20 As Long = 20
 Private Const LONG_21 As Long = 21
@@ -55,6 +55,7 @@ Private Const LONG_60 As Long = 60
 Private Const LONG_100 As Long = 100
 Private Const LONG_333 As Long = 333
 Private Const LONG_1000 As Long = 1000
+Private Const LONG_2048 As Long = 2048
 Private Const LONG_3000 As Long = 3000
 Private Const LONG_1E6  As Long = 1000000
 Private Const LONG_125000 As Long = 125000
@@ -86,12 +87,12 @@ Private Const HEX_1000 As Long = &H1000
 Private Const HEX_2000 As Long = &H2000
 Private Const HEX_3000 As Long = &H3000
 Private Const HEX_4000 As Long = &H4000
-Private Const HEX_8000 As Long = &H8000
-Private Const HEX_C000 As Long = &HC000
+Private Const HEX_8000 As Long = &H8000&                  ' trailing & - without it VBA reads the literal as the Integer -32768
+Private Const HEX_C000 As Long = &HC000&
 
 Private Const TEXT_ON As String = "On"              ' some text string constants for minor gains.
 Private Const TEXT_MS As String = " mS"
-Private Const TEXT_US As String = " �S"
+Private Const TEXT_US As String = " uS"
 Private Const TEXT_TO As String = " To "
 Private Const TEXT_OFF As String = "Off"
 Private Const TEXT_TRUE As String = "True"
@@ -363,7 +364,7 @@ Private Enum SYSTEM_ERRORS
              ACCESS_DENIED = 5
              INVALID_HANDLE = 6
              INVALID_DATA = 13
-             DEVICE_NOT_READY = 15
+             DEVICE_NOT_READY = 21
              INVALID_PARAMETER = 87
              INSUFFICIENT_BUFFER = 122
              OPERATION_ABORTED = 995
@@ -421,7 +422,7 @@ Private Declare PtrSafe Function Synchronous_Read_Bytes Lib "Kernel32.dll" Alias
 Private Declare PtrSafe Function Synchronous_Write_Bytes Lib "Kernel32.dll" Alias "WriteFile" _
 (ByVal Port_Handle As LongPtr, ByRef Buffer_Byte As Any, ByVal Bytes_Requested As Long, ByRef Bytes_Processed As Long, ByVal Overlapped_Null As LongPtr) As Long
 '
-Public Function START_COM_PORT(Port_Number As Long, Optional Port_Setttings As String) As Boolean
+Public Function START_COM_PORT(ByVal Port_Number As Long, Optional Port_Setttings As String) As Boolean
 '-------------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "START_COM_PORT"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -435,6 +436,7 @@ If Port_Valid Then Port_Debug = COM_PORT(Port_Number).Debug
 Dim Temp_Result As Boolean, Port_Handle As LongPtr
 Dim Port_Entered As Boolean, Error_Detail As String
 Dim Temp_Port_Name As String, Result_Text As String, Detail_Text As String
+Dim Opened_Here As Boolean, Saved_DLL_Error As Long
 
 Const Start_Text_1 As String = " Attempting to Open and Configure COM Port "
 Const Start_Text_2 As String = " Opened and Configured COM Port "
@@ -444,6 +446,8 @@ Const Start_Text_5 As String = " Failed to Open and Configure COM Port "
 Const Start_Text_6 As String = " Failed to Open COM Port, Existing Port Handle = "
 Const Start_Text_7 As String = " Port Number Invalid, Defined Port Number Range = "
 Const Start_Text_8 As String = " Structure size self-test failed, port not opened - see ABI_SELF_TEST"
+
+Err.Clear                                                  ' a stale error from the caller must not be reported as a start failure
 
 Result_Text = TEXT_FAILURE
 
@@ -467,6 +471,9 @@ Detail_Text = Start_Text_8
 
 ElseIf COM_PORT_CLOSED(Port_Number) Then
 If OPEN_COM_PORT(Port_Number) Then
+
+Opened_Here = True                                         ' this call owns the handle until the start succeeds or fails
+
 If CONFIGURE_COM_PORT(Port_Number, Port_Setttings) Then
 
         PURGE_BUFFERS Port_Number
@@ -477,7 +484,9 @@ If CONFIGURE_COM_PORT(Port_Number, Port_Setttings) Then
         Detail_Text = Start_Text_2 & Port_Number & Start_Text_3 & Port_Handle
 
 Else
+        Saved_DLL_Error = COM_PORT(Port_Number).DLL_Error   ' keep the configure error - closing the handle overwrites it
         STOP_PORT_CORE Port_Number, LONG_0                  ' close com port if configure failed
+        COM_PORT(Port_Number).DLL_Error = Saved_DLL_Error
 
         Detail_Text = Start_Text_4 & Port_Number
 End If
@@ -489,15 +498,18 @@ Else:   Detail_Text = Start_Text_7 & COM_PORT_RANGE:    End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
     Temp_Result = False
     Result_Text = TEXT_ERROR
     Detail_Text = Error_Detail
-End If
 
-If Port_Entered Then PORT_LEAVE Port_Number
+    If Opened_Here Then ABANDON_OPENED_PORT Port_Number        ' this call opened the port - never leave it open after a failed start
+
+End If
 
 If Port_Debug Or Not Port_Valid Then Call PRINT_DEBUG_TEXT(Module_Name, Result_Text, Temp_Port_Name & Detail_Text)
 
@@ -588,7 +600,7 @@ Result_Text = TEXT_FAILURE
 
 Clean_Settings = CLEAN_PORT_SETTINGS(Port_Settings)
 
-Selected_Text = IIf(Len(Clean_Settings) > LONG_4, Config_Text_1, Config_Text_2)
+Selected_Text = IIf(Len(Clean_Settings) > LONG_0, Config_Text_1, Config_Text_2)
 
 If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_STARTUP, COM_PORT(Port_Number).Name & Selected_Text)
 
@@ -630,10 +642,11 @@ Const Set_Text_5 As String = " Using Existing Port Settings, "
 Const Set_Text_6 As String = " Failed to build DCB, "
 Const Set_Text_7 As String = " Failed to apply configuration settings, "
 Const Set_Text_8 As String = " Failed to get existing Device Control Block (DCB) Settings "
+Const Set_Text_9 As String = " Inherited DCB flags kept, driver refused the change, "
 
 If GET_PORT_CONFIG(Port_Number) Then          ' get existing com port config (baud, parity etc.) into device control block
 
-    New_Settings = Len(Port_Settings) > LONG_4
+    New_Settings = Len(Port_Settings) > LONG_0
     
     Temp_String = IIf(New_Settings, Set_Text_1 & Port_Settings, Set_Text_2 & GET_PORT_SETTINGS(Port_Number))
 
@@ -651,6 +664,15 @@ If GET_PORT_CONFIG(Port_Number) Then          ' get existing com port config (ba
 
             ' BuildCommDCB does not set DCBlength - SetCommState requires it to be the size of the structure.
             COM_PORT(Port_Number).DCB.LENGTH_DCB = LenB(COM_PORT(Port_Number).DCB)
+
+            SET_DCB_SAFE_FLAGS Port_Number                         ' binary-safe: no NUL discard, no abort on error
+
+            COM_PORT(Port_Number).DCB.BIT_FIELD = COM_PORT(Port_Number).DCB.BIT_FIELD Or LONG_1          ' fBinary - always on for Windows
+            If COM_PORT(Port_Number).DCB.PARITY <> LONG_0 Then
+                COM_PORT(Port_Number).DCB.BIT_FIELD = COM_PORT(Port_Number).DCB.BIT_FIELD Or LONG_2      ' fParity - check parity when parity is in use
+            Else
+                COM_PORT(Port_Number).DCB.BIT_FIELD = COM_PORT(Port_Number).DCB.BIT_FIELD And Not LONG_2
+            End If
 
             Temp_Result = (Apply_Port_DCB(COM_PORT(Port_Number).Handle, COM_PORT(Port_Number).DCB) <> LONG_0)
             COM_PORT(Port_Number).DLL_Error = Err.LastDllError
@@ -682,6 +704,25 @@ If GET_PORT_CONFIG(Port_Number) Then          ' get existing com port config (ba
         Result_Text = TEXT_SUCCESS
         Detail_Text = Set_Text_5 & GET_PORT_SETTINGS_FROM_DCB(Port_Number)
 
+        ' Existing settings are kept, but fErrorChar / fNull / fAbortOnError left by a previous user of the port
+        ' are removed. A failure here must not fail the start, and must not leave a native error recorded.
+        ' The DCB is re-read after a failure so the stored copy still matches what the driver holds.
+
+        If (COM_PORT(Port_Number).DCB.BIT_FIELD And (HEX_400 Or HEX_800 Or HEX_4000)) <> LONG_0 Then
+
+            SET_DCB_SAFE_FLAGS Port_Number
+
+            If Apply_Port_DCB(COM_PORT(Port_Number).Handle, COM_PORT(Port_Number).DCB) = LONG_0 Then
+
+                Detail_Text = Detail_Text & Set_Text_9 & DLL_ERROR_TEXT(Err.LastDllError)
+                Query_Port_DCB COM_PORT(Port_Number).Handle, COM_PORT(Port_Number).DCB
+
+            End If
+
+            COM_PORT(Port_Number).DLL_Error = SYSTEM_ERRORS.SUCCESS
+
+        End If
+
     End If
 
 Else
@@ -697,6 +738,48 @@ If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, Result_Text, COM_PORT(Port
 SET_PORT_CONFIG = Temp_Result
 
 End Function
+
+Private Sub ABANDON_OPENED_PORT(Port_Number As Long)
+
+' Closes a port after a runtime error in the call that opened it. Not STOP_PORT_CORE - that yields.
+' Has its own handler because an On Error statement inside a handler that is already active has no effect.
+
+On Error Resume Next
+
+If COM_PORT(Port_Number).Handle <> LONG_0 Then
+
+    CLOSE_PORT_HANDLE Port_Number
+    COM_PORT(Port_Number).Name = vbNullString
+    COM_PORT(Port_Number).Handle = LONG_0
+
+End If
+
+End Sub
+
+Private Sub SET_DCB_SAFE_FLAGS(Port_Number As Long)
+
+' Clears fErrorChar (replace bytes with parity errors), fNull (discard NUL bytes) and fAbortOnError
+' (abort reads and writes on a line error), which would otherwise silently corrupt binary data or abort
+' every transfer after one line error. fErrorChar matters because the settings path turns on fParity.
+' XON/XOFF characters are only defaulted (17/19) when the two are equal, e.g. both zero.
+
+Const XON_DEFAULT As Byte = 17
+Const XOFF_DEFAULT As Byte = 19
+
+With COM_PORT(Port_Number).DCB
+
+    .BIT_FIELD = .BIT_FIELD And Not (HEX_400 Or HEX_800 Or HEX_4000)
+
+    If .CHAR_XON = .CHAR_XOFF Then
+
+        .CHAR_XON = XON_DEFAULT
+        .CHAR_XOFF = XOFF_DEFAULT
+
+    End If
+
+End With
+
+End Sub
 
 Private Function SET_PORT_VALUES(Port_Number As Long) As Boolean
 '-------------------------------------------------------------------------
@@ -721,7 +804,7 @@ Const READ_EXIT_TIMER_ELSE As Long = 125000
 
 Dim Temp_Result As Boolean
 Dim Frame_MicroSeconds As Single
-Dim Timeslice_Bytes As Long, Bytes_Per_Second As Long, Read_Buffer_Length As Long
+Dim Timeslice_Bytes As Long, Bytes_Per_Second As Long, Read_Buffer_Length As Long, Wait_Cap As Long
 
 Const TEXT_READ_BYTES As String = "READ_BYTES"
 Const TEXT_READ_BUFFER As String = "READ_BUFFER"
@@ -762,6 +845,14 @@ If COM_PORT(Port_Number).Timers.Exit_Loop_Wait > VBA_TIMEOUT / LONG_5 Then COM_P
 If COM_PORT(Port_Number).Timers.Char_Loop_Wait > VBA_TIMEOUT / LONG_5 Then COM_PORT(Port_Number).Timers.Char_Loop_Wait = LONG_1000
 If COM_PORT(Port_Number).Timers.Data_Loop_Wait > VBA_TIMEOUT / LONG_5 Then COM_PORT(Port_Number).Timers.Data_Loop_Wait = LONG_1000
 If COM_PORT(Port_Number).Timers.Line_Loop_Wait > VBA_TIMEOUT / LONG_5 Then COM_PORT(Port_Number).Timers.Line_Loop_Wait = LONG_1000
+
+Wait_Cap = Int(LONG_2048 * LONG_1000 / Bytes_Per_Second)           ' about 2048 bytes of line time - keeps a yield close at high baud rates
+If Wait_Cap < LONG_1 Then Wait_Cap = LONG_1
+
+If COM_PORT(Port_Number).Timers.Exit_Loop_Wait > Wait_Cap Then COM_PORT(Port_Number).Timers.Exit_Loop_Wait = Wait_Cap
+If COM_PORT(Port_Number).Timers.Char_Loop_Wait > Wait_Cap Then COM_PORT(Port_Number).Timers.Char_Loop_Wait = Wait_Cap
+If COM_PORT(Port_Number).Timers.Data_Loop_Wait > Wait_Cap Then COM_PORT(Port_Number).Timers.Data_Loop_Wait = Wait_Cap
+If COM_PORT(Port_Number).Timers.Line_Loop_Wait > Wait_Cap Then COM_PORT(Port_Number).Timers.Line_Loop_Wait = Wait_Cap
 
 Select Case Bytes_Per_Second
 
@@ -905,7 +996,7 @@ If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, Result_Text, COM_PORT(Port
 
 End Function
 
-Public Function STOP_COM_PORT(Port_Number As Long, Optional Drain_MilliSeconds As Long = LONG_0) As Boolean
+Public Function STOP_COM_PORT(ByVal Port_Number As Long, Optional ByVal Drain_MilliSeconds As Long = LONG_0) As Boolean
 '-----------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "STOP_COM_PORT"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -913,6 +1004,8 @@ If Port_Valid Then Port_Debug = COM_PORT(Port_Number).Debug
 '-----------------------------------------------------------------------
 ' Drain_MilliSeconds = 0 (default) is an abort close - queued transmit and unread receive data are purged.
 ' Drain_MilliSeconds > 0 is a graceful close - waits up to that time for the transmit queue to empty first.
+' If the queue does not empty, nothing is discarded: the port stays open and the result is False. Retry, or
+' stop with no drain time to abort. A cancel request during the wait forces the abort close.
 
 Dim Temp_Result As Boolean, Port_Entered As Boolean, Error_Detail As String
 
@@ -928,8 +1021,10 @@ If Port_Valid Then
 
     Else
 
-        ' Port busy: request cooperative cancellation so the owning operation unwinds, then let the
-        ' caller retry the stop. The port is never purged or closed underneath an active operation.
+        ' Port busy: request cooperative cancellation so the owning operation unwinds. The caller retries
+        ' the stop after returning from its callback (for example with Application.OnTime) - never in a loop
+        ' inside the callback, which would starve the operation being cancelled. The port is never purged or
+        ' closed underneath an active operation.
         CANCEL_COM_PORT Port_Number
 
         Call PRINT_BUSY_TEXT(Module_Name, Port_Number)
@@ -944,6 +1039,8 @@ End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
@@ -952,8 +1049,6 @@ If Len(Error_Detail) > LONG_0 Then
     Call PRINT_DEBUG_TEXT(Module_Name, TEXT_ERROR, Error_Detail)
 
 End If
-
-If Port_Entered Then PORT_LEAVE Port_Number
 
 STOP_COM_PORT = Temp_Result
 
@@ -976,6 +1071,7 @@ Const Stop_Text_2 As String = " Stopped COM Port with Handle "
 Const Stop_Text_3 As String = " Error Closing Port with Handle "
 Const Stop_Text_4 As String = " with Handle "
 Const Stop_Text_5 As String = " Transmit Queue Drained before Close = "
+Const Stop_Text_6 As String = " Transmit Data Still Queued, Port Left Open, Nothing Discarded "
 
 If Port_Valid Then
 
@@ -997,22 +1093,39 @@ If Drain_MilliSeconds > LONG_0 Then
 
 End If
 
-PURGE_COM_PORT Port_Number
+If Drain_MilliSeconds > LONG_0 And Not Drained And Not COM_PORT(Port_Number).Cancel_Requested Then
 
-If CLOSE_PORT_HANDLE(Port_Number) Then
-
-    PURGE_BUFFERS Port_Number
-    COM_PORT(Port_Number).Name = vbNullString
-    COM_PORT(Port_Number).Handle = LONG_0
-    Detail_Text = Stop_Text_2 & Temp_Handle
-    Result_Text = TEXT_SUCCESS
-    Temp_Result = True
+    Temp_Result = False                                    ' keep the queued data and the port - the caller retries or aborts
+    Result_Text = TEXT_FAILURE
+    Detail_Text = Stop_Text_6
 
 Else
 
-    Temp_Result = False
-    Result_Text = TEXT_FAILURE
-    Detail_Text = Stop_Text_3 & Temp_Handle
+    PURGE_COM_PORT Port_Number
+
+    If CLOSE_PORT_HANDLE(Port_Number) Then
+
+        PURGE_BUFFERS Port_Number
+        COM_PORT(Port_Number).Name = vbNullString
+        COM_PORT(Port_Number).Handle = LONG_0
+        Detail_Text = Stop_Text_2 & Temp_Handle
+        Result_Text = TEXT_SUCCESS
+        Temp_Result = True
+
+    Else
+
+        Temp_Result = False
+        Result_Text = TEXT_FAILURE
+        Detail_Text = Stop_Text_3 & Temp_Handle
+
+        If COM_PORT(Port_Number).DLL_Error = SYSTEM_ERRORS.INVALID_HANDLE Then   ' the handle is already gone - do not wedge the entry
+
+            COM_PORT(Port_Number).Name = vbNullString
+            COM_PORT(Port_Number).Handle = LONG_0
+
+        End If
+
+    End If
 
 End If
 
@@ -1058,19 +1171,23 @@ Do
 
     If COM_PORT(Port_Number).Cancel_Requested Then Exit Do ' cancel promotes the graceful close to an abort
 
+    If Wait_Remaining < LONG_1 Then Exit Do                ' deadline reached - the queue was polled once more after the last sleep
+
     Sleep_Time = IIf(Wait_Remaining < Loop_Time, Wait_Remaining, Loop_Time)
 
     Kernel_Sleep_MilliSeconds Sleep_Time
 
+    DoEvents                                               ' yield so a cancel can arrive and Office stays responsive
+
     Wait_Remaining = Wait_Remaining - Sleep_Time
 
-Loop Until Wait_Remaining < LONG_1
+Loop
 
 DRAIN_PORT_OUTPUT = Queue_Empty
 
 End Function
 
-Public Function WAIT_COM_PORT(Port_Number As Long, Optional Wait_MilliSeconds As Long = LONG_333) As Boolean
+Public Function WAIT_COM_PORT(ByVal Port_Number As Long, Optional ByVal Wait_MilliSeconds As Long = LONG_333) As Boolean
 '-----------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "WAIT_COM_PORT"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -1135,6 +1252,8 @@ End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
@@ -1143,8 +1262,6 @@ If Len(Error_Detail) > LONG_0 Then
     Call PRINT_DEBUG_TEXT(Module_Name, TEXT_ERROR, Error_Detail)
 
 End If
-
-If Port_Entered Then PORT_LEAVE Port_Number
 
 WAIT_COM_PORT = WAIT_RESULT
 
@@ -1254,7 +1371,7 @@ SYNCHRONOUS_WAIT_COM_PORT = Data_Waiting
 
 End Function
 
-Public Function READ_COM_PORT(Port_Number As Long, Optional Number_Characters As Long) As String
+Public Function READ_COM_PORT(ByVal Port_Number As Long, Optional ByVal Number_Characters As Long) As String
 '------------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "READ_COM_PORT"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -1331,6 +1448,8 @@ End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
@@ -1340,13 +1459,11 @@ If Len(Error_Detail) > LONG_0 Then
 
 End If
 
-If Port_Entered Then PORT_LEAVE Port_Number
-
 READ_COM_PORT = Read_Character_String
 
 End Function
 
-Public Function RECEIVE_COM_PORT(Port_Number As Long, Optional Max_Bytes As Long = LONG_0, Optional Total_MilliSeconds As Long = LONG_0) As String
+Public Function RECEIVE_COM_PORT(ByVal Port_Number As Long, Optional ByVal Max_Bytes As Long = LONG_0, Optional ByVal Total_MilliSeconds As Long = LONG_0) As String
 '---------------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "RECEIVE_COM_PORT"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -1354,8 +1471,8 @@ If Port_Valid Then Port_Debug = COM_PORT(Port_Number).Debug
 '---------------------------------------------------------------------------
 ' Max_Bytes = 0 (default) and Total_MilliSeconds = 0 (default) keep the original unbounded behaviour, where
 ' receive ends only on read inactivity (Read_Wait_Time) or read failure.
-' Max_Bytes > 0 stops receiving once that many bytes have been accumulated - the last read can overshoot
-' the limit by up to one timeslice, because bytes already taken from the driver are never discarded.
+' Max_Bytes > 0 stops receiving once that many bytes have been accumulated. Each read request is capped at the
+' bytes still allowed, so the limit is exact for single-byte character sets.
 ' Total_MilliSeconds > 0 stops receiving once that much time has elapsed since the call started.
 
 Dim Temp_Result As Boolean
@@ -1363,7 +1480,7 @@ Dim Receive_MicroSeconds As Currency, Receive_Start_Time As Currency
 Dim Limit_Reached As Boolean, Port_Entered As Boolean, Interrupted As Boolean
 Dim Receive_String As String, Error_Detail As String
 Dim Receive_Handle As LongPtr
-Dim Receive_Byte_Count As Long, Bytes_Per_Second As Long, Full_Read As Long
+Dim Receive_Byte_Count As Long, Bytes_Per_Second As Long, Full_Read As Long, Read_Request As Long
 
 Const Temp_Text_01 As String = " Port Settings = "
 Const Temp_Text_02 As String = " Timeslice Bytes/Second = "
@@ -1399,6 +1516,9 @@ Receive_Handle = COM_PORT(Port_Number).Handle              ' verified after ever
 
 Receive_Start_Time = GET_HOST_MICROSECONDS
 
+' The inactivity window starts at this call, so a reply arriving shortly after a transmit is not missed.
+COM_PORT(Port_Number).Timers.Port_Data_Time = Receive_Start_Time
+
 COM_PORT(Port_Number).Buffers.Receive_Result = vbNullString
 
 If Port_Debug Then
@@ -1414,7 +1534,13 @@ End If
         If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_READING, COM_PORT(Port_Number).Name & Temp_Text_04)
         
         Do
-            Temp_Result = SYNCHRONOUS_READ_COM_PORT(Port_Number, COM_PORT(Port_Number).Timers.Timeslice_Bytes)
+            Read_Request = Full_Read
+            If Max_Bytes > LONG_0 Then
+                If Max_Bytes - Len(COM_PORT(Port_Number).Buffers.Receive_Result) < Read_Request Then Read_Request = Max_Bytes - Len(COM_PORT(Port_Number).Buffers.Receive_Result)
+            End If
+            If Read_Request < LONG_1 Then Read_Request = LONG_1
+
+            Temp_Result = SYNCHRONOUS_READ_COM_PORT(Port_Number, Read_Request)
             
             If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_READING, COM_PORT(Port_Number).Name & Temp_Text_03 & Temp_Result)
             
@@ -1423,16 +1549,20 @@ End If
             If Not COM_PORT(Port_Number).Buffers.Read_Buffer_Empty Then
             
                 COM_PORT(Port_Number).Buffers.Receive_Result = COM_PORT(Port_Number).Buffers.Receive_Result & COM_PORT(Port_Number).Buffers.Read_Result
-                           
+
+                Limit_Reached = RECEIVE_LIMIT_REACHED(Port_Number, Max_Bytes, Total_MilliSeconds, Receive_Start_Time)
+
+                If Not Limit_Reached Then                                ' limit hit - skip the wait
+
                 Select Case COM_PORT(Port_Number).Buffers.Synchronous_Bytes_Read
                 
                 Case Is < LONG_4                                         ' assume manual data entry, improve responsiveness.
                 If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_SINGLE, COM_PORT(Port_Number).Name & Temp_Text_06 & COM_PORT(Port_Number).Timers.Char_Loop_Wait & TEXT_MS)
-                Kernel_Sleep_MilliSeconds COM_PORT(Port_Number).Timers.Char_Loop_Wait
+                RECEIVE_SLEEP COM_PORT(Port_Number).Timers.Char_Loop_Wait, Total_MilliSeconds, Receive_Start_Time
             
                 Case Is < LONG_21                                        ' assume continuous data ending, improve responsiveness.
                 If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_WAITING, COM_PORT(Port_Number).Name & Temp_Text_07 & COM_PORT(Port_Number).Timers.Data_Loop_Wait & TEXT_MS)
-                Kernel_Sleep_MilliSeconds COM_PORT(Port_Number).Timers.Data_Loop_Wait
+                RECEIVE_SLEEP COM_PORT(Port_Number).Timers.Data_Loop_Wait, Total_MilliSeconds, Receive_Start_Time
                 
                 Case Is = Full_Read                                      ' assume more data available immediately, improve responsiveness.
                 If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_LOOPING, COM_PORT(Port_Number).Name & Temp_Text_09)
@@ -1440,7 +1570,7 @@ End If
                 
                 Case Else                                                ' assume more data from continuous source, allow buffer to refill.
                 If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_WAITING, COM_PORT(Port_Number).Name & Temp_Text_08 & COM_PORT(Port_Number).Timers.Line_Loop_Wait & TEXT_MS)
-                Kernel_Sleep_MilliSeconds COM_PORT(Port_Number).Timers.Line_Loop_Wait
+                RECEIVE_SLEEP COM_PORT(Port_Number).Timers.Line_Loop_Wait, Total_MilliSeconds, Receive_Start_Time
                 
                 End Select
 
@@ -1449,6 +1579,8 @@ End If
                 Interrupted = OPERATION_INTERRUPTED(Port_Number, Receive_Handle)
 
                 Limit_Reached = RECEIVE_LIMIT_REACHED(Port_Number, Max_Bytes, Total_MilliSeconds, Receive_Start_Time)
+
+                End If
 
             End If
 
@@ -1466,7 +1598,7 @@ End If
         If Not COM_PORT(Port_Number).Timers.Read_Timeout And Not Limit_Reached And Not Interrupted Then
 
         If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_NO_DATA, COM_PORT(Port_Number).Name & Temp_Text_05 & COM_PORT(Port_Number).Timers.Exit_Loop_Wait & TEXT_MS)
-        Kernel_Sleep_MilliSeconds COM_PORT(Port_Number).Timers.Exit_Loop_Wait
+        RECEIVE_SLEEP COM_PORT(Port_Number).Timers.Exit_Loop_Wait, Total_MilliSeconds, Receive_Start_Time
 
         End If
 
@@ -1516,11 +1648,11 @@ End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_ERROR, Error_Detail)
-
-If Port_Entered Then PORT_LEAVE Port_Number
 
 RECEIVE_COM_PORT = Receive_String                          ' local result - never index COM_PORT with an unvalidated port number
 
@@ -1544,7 +1676,30 @@ RECEIVE_LIMIT_REACHED = Limit_Hit
 
 End Function
 
-Public Function TRANSMIT_COM_PORT(Port_Number As Long, Transmit_Text As String) As Boolean
+Private Sub RECEIVE_SLEEP(ByVal Wait_MilliSeconds As Long, ByVal Total_MilliSeconds As Long, Start_Time As Currency)
+'---------------------------------------------------------------------------
+' Receive loop wait. With a Total_MilliSeconds bound the wait is clamped to the time left, so a long
+' loop wait can no longer overshoot the bound; without a bound the wait is exactly as requested.
+
+Dim Time_Left As Currency
+
+If Total_MilliSeconds > LONG_0 Then
+
+    Time_Left = CCur(Total_MilliSeconds) - (GET_HOST_MICROSECONDS - Start_Time) / LONG_1000
+
+    If Time_Left < LONG_1 Then
+        Wait_MilliSeconds = LONG_0
+    ElseIf Time_Left < Wait_MilliSeconds Then
+        Wait_MilliSeconds = Int(Time_Left)
+    End If
+
+End If
+
+Kernel_Sleep_MilliSeconds Wait_MilliSeconds
+
+End Sub
+
+Public Function TRANSMIT_COM_PORT(ByVal Port_Number As Long, Transmit_Text As String) As Boolean
 '---------------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "TRANSMIT_COM_PORT"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -1577,6 +1732,8 @@ End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
@@ -1586,15 +1743,13 @@ If Len(Error_Detail) > LONG_0 Then
 
 End If
 
-If Port_Entered Then PORT_LEAVE Port_Number
-
 DoEvents
 
 TRANSMIT_COM_PORT = Temp_Result
 
 End Function
 
-Private Function TRANSMIT_PORT_CORE(Port_Number As Long, Transmit_Text As String) As Boolean
+Private Function TRANSMIT_PORT_CORE(Port_Number As Long, ByVal Transmit_Text As String) As Boolean
 '---------------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "TRANSMIT_PORT_CORE"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -1622,6 +1777,7 @@ Const Temp_Text_9 As String = " Transmit Failed, Bytes Sent = "
 Const Temp_Text_10 As String = " of "
 Const Temp_Text_11 As String = " Transmit Not Possible, Timeslice Bytes = "
 Const Temp_Text_12 As String = " Transmit Cancelled or Port Restarted, Bytes Sent = "
+Const Temp_Text_13 As String = " Transmit Not Possible, Text converts to more bytes than characters (double-byte code page) "
 
 If Port_Started(Port_Number) Then
 
@@ -1641,7 +1797,11 @@ If Port_Debug Then
 
 End If
 
-If Timeslice_Bytes < LONG_1 Then                           ' a zero step would loop forever - port values are not usable
+If Not ANSI_SAFE(Transmit_Text) Then                       ' nothing is sent - the byte count would not match the character count
+
+    If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_FAILURE, COM_PORT(Port_Number).Name & Temp_Text_13)
+
+ElseIf Timeslice_Bytes < LONG_1 Then                       ' a zero step would loop forever - port values are not usable
 
     If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_FAILURE, COM_PORT(Port_Number).Name & Temp_Text_11 & Timeslice_Bytes)
 
@@ -1677,11 +1837,12 @@ For Loop_Counter = LONG_1 To Transmit_Length Step Timeslice_Bytes
 
 Next Loop_Counter
 
-Temp_Result = Chunk_Result And (Total_Bytes_Sent = Transmit_Length) And (Transmit_Length > LONG_0) And Not Interrupted
+' A cancel that arrives after the last byte was written does not make a complete write a failure.
+Temp_Result = Chunk_Result And (Total_Bytes_Sent = Transmit_Length) And (Transmit_Length > LONG_0)
 
 COM_PORT(Port_Number).Buffers.Transmit_Length = Total_Bytes_Sent
 
-If Interrupted Then
+If Interrupted And Not Temp_Result Then
 
     If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_FAILURE, COM_PORT(Port_Number).Name & Temp_Text_12 & Total_Bytes_Sent & Temp_Text_10 & Transmit_Length)
 
@@ -1713,6 +1874,17 @@ Else
 End If
 
 TRANSMIT_PORT_CORE = Temp_Result
+
+End Function
+
+Private Function ANSI_SAFE(Text_Value As String) As Boolean
+
+' True if the text converts to one ANSI byte per character. The write loops count characters as bytes,
+' so on a double-byte code page text that converts to more bytes than characters would be truncated.
+' This does not detect substitution: on a single-byte code page an unmappable character still becomes
+' one byte (for example "?"), so it passes. Use TRANSMIT_BYTES when exact bytes matter.
+
+ANSI_SAFE = (LenB(StrConv(Text_Value, vbFromUnicode)) = Len(Text_Value))
 
 End Function
 
@@ -1811,8 +1983,10 @@ Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
 If Port_Valid Then Port_Debug = COM_PORT(Port_Number).Debug
 '--------------------------------------------------------------------------
 
-Dim Error_Text As String
+Dim Error_Text As String, Read_Raw As String
 Dim Temp_Result As Boolean
+Dim Read_Bytes(LONG_0 To 4095) As Byte                    ' same size as the fixed read buffer (maximum timeslice bytes)
+Dim Read_Count As Long
 
 Const TEXT_SYNC_READ As String = "SYNC_READ"
 
@@ -1821,7 +1995,12 @@ Const Temp_Text_2 As String = " Read FAILED, "
 
 COM_PORT(Port_Number).Buffers.Synchronous_Bytes_Read = LONG_0   ' never assess a read using a stale byte count
 
-Temp_Result = (Synchronous_Read(COM_PORT(Port_Number).Handle, COM_PORT(Port_Number).Buffers.Read_Buffer, Read_Bytes_Requested, COM_PORT(Port_Number).Buffers.Synchronous_Bytes_Read, NULL_POINTER) <> LONG_0)
+Read_Count = Read_Bytes_Requested
+If Read_Count > 4096 Then Read_Count = 4096
+
+' Read raw bytes (no ANSI marshalling of a fixed string), then convert only the bytes received.
+
+Temp_Result = (Synchronous_Read_Bytes(COM_PORT(Port_Number).Handle, Read_Bytes(LONG_0), Read_Count, COM_PORT(Port_Number).Buffers.Synchronous_Bytes_Read, NULL_POINTER) <> LONG_0)
 
 COM_PORT(Port_Number).DLL_Error = Err.LastDllError
 If Temp_Result Then COM_PORT(Port_Number).DLL_Error = SYSTEM_ERRORS.SUCCESS
@@ -1842,7 +2021,8 @@ If Temp_Result Then
         COM_PORT(Port_Number).Timers.Port_Data_Time = GET_HOST_MICROSECONDS
         COM_PORT(Port_Number).Timers.Last_Data_Time = LONG_0
         COM_PORT(Port_Number).Timers.Read_Timeout = False
-        COM_PORT(Port_Number).Buffers.Read_Result = Left$(COM_PORT(Port_Number).Buffers.Read_Buffer, COM_PORT(Port_Number).Buffers.Synchronous_Bytes_Read)
+        Read_Raw = Read_Bytes
+        COM_PORT(Port_Number).Buffers.Read_Result = StrConv(LeftB$(Read_Raw, COM_PORT(Port_Number).Buffers.Synchronous_Bytes_Read), vbUnicode)
         COM_PORT(Port_Number).Buffers.Read_Buffer_Empty = False
         
     End If
@@ -1879,6 +2059,7 @@ Dim Error_Text As String, Write_Chunk As String
 Dim Write_Buffer_Length As Long, Bytes_Remaining As Long, Total_Bytes_Sent As Long
 Dim Chunk_Bytes_Sent As Long, Stalled_Writes As Long
 Dim Write_Complete As Boolean, Api_Result As Boolean
+Dim Write_Handle As LongPtr
 
 Const MAX_STALLED_WRITES As Long = 3
 
@@ -1892,6 +2073,7 @@ Const Temp_Text_5 As String = " of "
 Const Temp_Text_6 As String = " Write Requested with Empty Write Buffer "
 
 Write_Buffer_Length = Len(COM_PORT(Port_Number).Buffers.Write_Buffer)
+Write_Handle = COM_PORT(Port_Number).Handle                ' verified after every yield
 
 If Write_Buffer_Length > LONG_0 Then
 
@@ -1914,7 +2096,13 @@ Do
 
     If Chunk_Bytes_Sent > LONG_0 Then Stalled_Writes = LONG_0 Else Stalled_Writes = Stalled_Writes + LONG_1
 
-Loop Until Total_Bytes_Sent >= Write_Buffer_Length Or Stalled_Writes >= MAX_STALLED_WRITES
+    If Total_Bytes_Sent >= Write_Buffer_Length Or Stalled_Writes >= MAX_STALLED_WRITES Then Exit Do
+
+    DoEvents                                               ' each stalled write can block for the full write timeout
+
+    If OPERATION_INTERRUPTED(Port_Number, Write_Handle) Then Exit Do
+
+Loop
 
 Write_Complete = Api_Result And (Total_Bytes_Sent = Write_Buffer_Length)
 
@@ -1952,7 +2140,7 @@ SYNCHRONOUS_WRITE_COM_PORT = Write_Complete
 
 End Function
 
-Public Function SEND_COM_PORT(Port_Number As Long, Send_Variable As Variant) As Boolean
+Public Function SEND_COM_PORT(ByVal Port_Number As Long, Send_Variable As Variant) As Boolean
 '------------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "SEND_COM_PORT"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -1961,10 +2149,11 @@ If Port_Valid Then Port_Debug = COM_PORT(Port_Number).Debug
 
 ' https://docs.microsoft.com/en-us/dotnet/visual-basic/language-reference/functions/return-values-for-the-cstr-function
 
-Dim Send_Result As Boolean
+Dim Send_Result As Boolean, Send_Value As Variant
 Dim Port_Entered As Boolean, Error_Detail As String
 
 Const Temp_Text As String = " Transmit Result = "
+Const Temp_Text_2 As String = " Send Rejected, Error value or array not supported "
 
 If Port_Valid Then
 
@@ -1976,8 +2165,18 @@ If Port_Valid Then
 
     If Port_Started(Port_Number) Then
 
-        Send_Result = TRANSMIT_PORT_CORE(Port_Number, CStr(Send_Variable))
-        If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_RESULT, COM_PORT(Port_Number).Name & Temp_Text & Send_Result)
+        Send_Value = Send_Variable                         ' a Range yields its value; arrays and error values cannot be sent as text
+
+        If IsError(Send_Value) Or IsArray(Send_Value) Then
+
+            If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_FAILURE, COM_PORT(Port_Number).Name & Temp_Text_2)
+
+        Else
+
+            Send_Result = TRANSMIT_PORT_CORE(Port_Number, CStr(Send_Value))
+            If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_RESULT, COM_PORT(Port_Number).Name & Temp_Text & Send_Result)
+
+        End If
 
     Else
 
@@ -1999,6 +2198,8 @@ End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
@@ -2008,13 +2209,11 @@ If Len(Error_Detail) > LONG_0 Then
 
 End If
 
-If Port_Entered Then PORT_LEAVE Port_Number
-
 SEND_COM_PORT = Send_Result
 
 End Function
 
-Public Function PUT_COM_PORT(Port_Number As Long, Put_String As String) As Boolean
+Public Function PUT_COM_PORT(ByVal Port_Number As Long, Put_String As String) As Boolean
 '-----------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "PUT_COM_PORT"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -2033,6 +2232,7 @@ Const TEXT_PUT_BYTE As String = "PUT_BYTE"
 Const Temp_Text_1 As String = " Put Failed, No Data Supplied "
 Const Temp_Text_2 As String = " Put Failed, "
 Const Temp_Text_3 As String = " Put Failed, Bytes Written = "
+Const Temp_Text_4 As String = " Put Failed, Character converts to more than one byte (double-byte code page) "
 
 If Port_Valid Then
 
@@ -2047,6 +2247,10 @@ If Port_Valid Then
         If Len(Put_String) < LONG_1 Then
 
             If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_PUT_BYTE, COM_PORT(Port_Number).Name & Temp_Text_1)
+
+        ElseIf Not ANSI_SAFE(Left$(Put_String, LONG_1)) Then
+
+            If Port_Debug Then Call PRINT_DEBUG_TEXT(Module_Name, TEXT_PUT_BYTE, COM_PORT(Port_Number).Name & Temp_Text_4)
 
         Else
 
@@ -2092,6 +2296,8 @@ End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
@@ -2101,21 +2307,19 @@ If Len(Error_Detail) > LONG_0 Then
 
 End If
 
-If Port_Entered Then PORT_LEAVE Port_Number
-
 PUT_COM_PORT = Write_Result
 
 End Function
 
-Public Function GET_COM_PORT(Port_Number As Long) As String
+Public Function GET_COM_PORT(ByVal Port_Number As Long) As String
 '-----------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "GET_COM_PORT"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
 If Port_Valid Then Port_Debug = COM_PORT(Port_Number).Debug
 '-----------------------------------------------------------------------
 
-' Reads at most one byte. An empty result means no data OR a failed read - the native status is recorded
-' in the port profile (DLL_Error) and reported in debug output so the two cases can be told apart.
+' Reads at most one byte. An empty result means no data OR a failed read - PORT_LAST_ERROR tells the two
+' cases apart (0 means the read succeeded and there was no data).
 
 Dim Read_Byte_Count As Long
 Dim Api_Result As Boolean, Port_Entered As Boolean
@@ -2172,6 +2376,8 @@ End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
@@ -2180,8 +2386,6 @@ If Len(Error_Detail) > LONG_0 Then
     Call PRINT_DEBUG_TEXT(Module_Name, TEXT_ERROR, Error_Detail)
 
 End If
-
-If Port_Entered Then PORT_LEAVE Port_Number
 
 GET_COM_PORT = Get_Character
 
@@ -2310,7 +2514,7 @@ SET_PORT_TIMERS = Temp_Result
 
 End Function
 
-Public Function SHOW_PORT_TIMERS(Port_Number As Long) As Boolean
+Public Function SHOW_PORT_TIMERS(ByVal Port_Number As Long) As Boolean
 '--------------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "SHOW_PORT_TIMERS"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -2391,6 +2595,8 @@ End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
@@ -2400,13 +2606,11 @@ If Len(Error_Detail) > LONG_0 Then
 
 End If
 
-If Port_Entered Then PORT_LEAVE Port_Number
-
 SHOW_PORT_TIMERS = Temp_Result
 
 End Function
 
-Public Function SHOW_PORT_QUEUES(Port_Number As Long) As Boolean
+Public Function SHOW_PORT_QUEUES(ByVal Port_Number As Long) As Boolean
 '--------------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "SHOW_PORT_QUEUES"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -2467,6 +2671,8 @@ End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
@@ -2476,13 +2682,11 @@ If Len(Error_Detail) > LONG_0 Then
 
 End If
 
-If Port_Entered Then PORT_LEAVE Port_Number
-
 SHOW_PORT_QUEUES = Temp_Result
 
 End Function
 
-Public Function CHECK_COM_PORT(Port_Number As Long) As Long
+Public Function CHECK_COM_PORT(ByVal Port_Number As Long) As Long
 '-------------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "CHECK_COM_PORT"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -2555,6 +2759,8 @@ End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
@@ -2564,15 +2770,13 @@ If Len(Error_Detail) > LONG_0 Then
 
 End If
 
-If Port_Entered Then PORT_LEAVE Port_Number
-
 DoEvents
 
 CHECK_COM_PORT = Temp_Queue
 
 End Function
 
-Public Function SHOW_PORT_ERRORS(Port_Number As Long) As Boolean
+Public Function SHOW_PORT_ERRORS(ByVal Port_Number As Long) As Boolean
 '--------------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "SHOW_PORT_ERRORS"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -2620,9 +2824,18 @@ Port_Name = COM_PORT(Port_Number).Name
 
 ' Report current AND OR-accumulated error bits, so errors consumed by earlier status polls
 ' (wait/check/queue functions also call ClearCommError) are still surfaced here exactly once.
-Port_Error = COM_PORT(Port_Number).Port_Errors Or COM_PORT(Port_Number).Error_History
+If Temp_Result Then
 
-If Temp_Result Then COM_PORT(Port_Number).Error_History = LONG_0
+    Port_Error = COM_PORT(Port_Number).Port_Errors Or COM_PORT(Port_Number).Error_History
+    COM_PORT(Port_Number).Error_History = LONG_0
+
+Else
+
+    ' ClearCommError failed, so Port_Errors is stale - show only the accumulated history.
+    Port_Error = COM_PORT(Port_Number).Error_History
+    Call PRINT_DEBUG_TEXT(Module_Name, TEXT_FAILURE, Port_Name & " Clear Comms Error Failed, " & Error_Text)
+
+End If
 
 Temp_Error(LONG_1) = IIf(Port_Error And Port_Errors.OVERFLOW, TEXT_TRUE, TEXT_FALSE)
 Temp_Error(LONG_2) = IIf(Port_Error And Port_Errors.OVERRUN, TEXT_TRUE, TEXT_FALSE)
@@ -2656,6 +2869,8 @@ End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
@@ -2664,8 +2879,6 @@ If Len(Error_Detail) > LONG_0 Then
     Call PRINT_DEBUG_TEXT(Module_Name, TEXT_ERROR, Error_Detail)
 
 End If
-
-If Port_Entered Then PORT_LEAVE Port_Number
 
 SHOW_PORT_ERRORS = Temp_Result
 
@@ -2858,7 +3071,7 @@ Const Temp_Spaces As String = "     "
 Const Temp_Device As String = "DEVICE CONTROL"
 Const Temp_Text_1 As String = Temp_Spaces & " 0=Disable, 1=Enable, 2=Handshake"
 Const Temp_Text_2 As String = Temp_Spaces & " 0=Disable, 1=Enable, 2=Handshake, 3=Toggle"
-Const Temp_Text_3 As String = Temp_Spaces & " Bits 16-32 unused"
+Const Temp_Text_3 As String = Temp_Spaces & " Bits 15-31 unused"
 Const Temp_Text_4 As String = Temp_Spaces & " 0=None, 1=Odd, 2=Even, 3=Mark, 4=Space"
 Const Temp_Text_5 As String = Temp_Spaces & " 0=1 Stop Bit, 1=1.5 Stop Bits, 2=2 Stop Bits"
 
@@ -2887,7 +3100,7 @@ DCB_TEXT(20) = " Parity Error - Replace Bytes ": DCB_VALUE(20) = IIf(DCB_LOWBITS
 DCB_TEXT(21) = " Discard Null Characters      ": DCB_VALUE(21) = IIf(DCB_LOWBITS And HEX_800, TEXT_ON, TEXT_OFF)
 DCB_TEXT(22) = " RTS Control Bits             ": DCB_VALUE(22) = Int((DCB_LOWBITS And HEX_3000) / &HFFF) & Temp_Text_2
 DCB_TEXT(23) = " Abort on Error               ": DCB_VALUE(23) = IIf(DCB_LOWBITS And HEX_4000, TEXT_ON, TEXT_OFF)
-DCB_TEXT(24) = " Bits 16-32                   ": DCB_VALUE(24) = Int(DCB_LOWBITS And HEX_C000) & Temp_Text_3
+DCB_TEXT(24) = " Bits 15-31                   ": DCB_VALUE(24) = Int(DCB_LOWBITS And &HFFFF8000) & Temp_Text_3
 DCB_TEXT(25) = " Reserved Word 0              ": DCB_VALUE(25) = COM_PORT(Port_Number).DCB.RESERVED_0
 DCB_TEXT(26) = " XON Limit                    ": DCB_VALUE(26) = COM_PORT(Port_Number).DCB.LIMIT_XON
 DCB_TEXT(27) = " XOFF Limit                   ": DCB_VALUE(27) = COM_PORT(Port_Number).DCB.LIMIT_XOFF
@@ -2933,7 +3146,7 @@ SHOW_PORT_DCB = Temp_Result
 
 End Function
 
-Public Function SHOW_PORT_STATUS(Port_Number As Long) As Boolean
+Public Function SHOW_PORT_STATUS(ByVal Port_Number As Long) As Boolean
 ' not Static: persistent locals would leak guard/result state between calls
 '--------------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "SHOW_PORT_STATUS"
@@ -3028,6 +3241,8 @@ End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
@@ -3036,8 +3251,6 @@ If Len(Error_Detail) > LONG_0 Then
     Call PRINT_DEBUG_TEXT(Module_Name, TEXT_ERROR, Error_Detail)
 
 End If
-
-If Port_Entered Then PORT_LEAVE Port_Number
 
 SHOW_PORT_STATUS = Temp_Result
 
@@ -3360,7 +3573,7 @@ CARRIER_DETECT = Signal_State
 
 End Function
 
-Public Function SIGNAL_COM_PORT(Port_Number As Long, Signal_Function As Long) As Boolean
+Public Function SIGNAL_COM_PORT(ByVal Port_Number As Long, Signal_Function As Long) As Boolean
 '-------------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "SIGNAL_COM_PORT"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -3437,6 +3650,8 @@ End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
@@ -3446,13 +3661,11 @@ If Len(Error_Detail) > LONG_0 Then
 
 End If
 
-If Port_Entered Then PORT_LEAVE Port_Number
-
 SIGNAL_COM_PORT = Signal_Result
 
 End Function
 
-Public Function REQUEST_TO_SEND(Port_Number As Long, RTS_State As Boolean) As Boolean
+Public Function REQUEST_TO_SEND(ByVal Port_Number As Long, RTS_State As Boolean) As Boolean
 '-------------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "REQUEST_TO_SEND"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -3538,6 +3751,8 @@ End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
@@ -3546,8 +3761,6 @@ If Len(Error_Detail) > LONG_0 Then
     Call PRINT_DEBUG_TEXT(Module_Name, TEXT_ERROR, Error_Detail)
 
 End If
-
-If Port_Entered Then PORT_LEAVE Port_Number
 
 REQUEST_TO_SEND = RTS_Result
 
@@ -3708,7 +3921,7 @@ Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
 
-    Port_Debug = COM_PORT(Port_Number).Debug               ' invalid input - debug state unchanged
+    If Port_Valid Then Port_Debug = COM_PORT(Port_Number).Debug   ' invalid input - debug state unchanged (no profile exists for an invalid port)
     Call PRINT_DEBUG_TEXT(Module_Name, TEXT_ERROR, Error_Detail)
 
 End If
@@ -3724,12 +3937,12 @@ Dim New_Settings As String
 New_Settings = Trim(Port_Settings)
 New_Settings = UCase(New_Settings)
 
-New_Settings = Replace(New_Settings, TEXT_COMMA, TEXT_SPACE, , , vbTextCompare)
+If InStr(New_Settings, TEXT_EQUALS) > LONG_0 Then New_Settings = Replace(New_Settings, TEXT_COMMA, TEXT_SPACE, , , vbTextCompare)   ' key=value form only - a comma list such as 9600,N,8,1 is a valid BuildCommDCB string
+New_Settings = Replace(New_Settings, TEXT_DOUBLE_SPACE, TEXT_SPACE, , , vbTextCompare)   ' collapse runs first, or "A  =  B" keeps a space around "="
+New_Settings = Replace(New_Settings, TEXT_DOUBLE_SPACE, TEXT_SPACE, , , vbTextCompare)
+New_Settings = Replace(New_Settings, TEXT_DOUBLE_SPACE, TEXT_SPACE, , , vbTextCompare)
 New_Settings = Replace(New_Settings, TEXT_SPACE_EQUALS, TEXT_EQUALS, , , vbTextCompare)
 New_Settings = Replace(New_Settings, TEXT_EQUALS_SPACE, TEXT_EQUALS, , , vbTextCompare)
-New_Settings = Replace(New_Settings, TEXT_DOUBLE_SPACE, TEXT_SPACE, , , vbTextCompare)
-New_Settings = Replace(New_Settings, TEXT_DOUBLE_SPACE, TEXT_SPACE, , , vbTextCompare)
-New_Settings = Replace(New_Settings, TEXT_DOUBLE_SPACE, TEXT_SPACE, , , vbTextCompare)
 
 CLEAN_PORT_SETTINGS = New_Settings
 
@@ -3752,6 +3965,22 @@ If Port_Number_Valid(Port_Number) Then
 End If
 
 COM_PORT_CLOSED = Temp_Result
+
+End Function
+
+Public Function Port_Ready(Port_Number As Long) As Boolean
+
+' Alias of Port_Started - the No-Debug module uses this name, so code using it compiles with either module.
+
+Port_Ready = Port_Started(Port_Number)
+
+End Function
+
+Public Function Port_Valid(Port_Number As Long) As Boolean
+
+' Alias of Port_Number_Valid - the No-Debug module uses this name, so code using it compiles with either module.
+
+Port_Valid = Port_Number_Valid(Port_Number)
 
 End Function
 
@@ -3783,9 +4012,12 @@ End Function
 
 Public Function CLEAR_PORT_BUSY(Port_Number As Long) As Boolean
 
-' Recovery escape hatch: clears the per-port operation guard.
-' Only needed if an operation was interrupted by the VBE (Ctrl-Break followed by Reset), which stops
-' the guarded function before its cleanup path runs. Never call this while an operation is running.
+' Recovery escape hatch: clears the per-port operation guard. It helps in break mode only, when an
+' operation interrupted by the VBE (Ctrl-Break) will not be resumed: call this from the Immediate window,
+' then stop the port. To resume the operation instead, just continue - it releases the guard itself.
+' A VBE Reset or End discards the module-level state, losing the stored handle while the operating
+' system keeps the port open - close the host application to release it. Never call this if the
+' interrupted operation may still resume.
 
 If Port_Number_Valid(Port_Number) Then
 
@@ -3796,7 +4028,7 @@ End If
 
 End Function
 
-Public Function TRANSMIT_BYTES(Port_Number As Long, Transmit_Data() As Byte) As Boolean
+Public Function TRANSMIT_BYTES(ByVal Port_Number As Long, Transmit_Data() As Byte) As Boolean
 '---------------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "TRANSMIT_BYTES"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -3871,6 +4103,8 @@ If Port_Valid Then
 
             If Interrupted Then Exit Do                    ' cancelled or port restarted - stop touching the port
 
+            If BYTE_ARRAY_LENGTH(Transmit_Data) <> Data_Length Then Interrupted = True: Exit Do   ' caller's array was resized during the yield
+
         Loop
 
         Temp_Result = Api_Result And (Total_Bytes_Sent = Data_Length) And Not Interrupted
@@ -3901,6 +4135,8 @@ End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
@@ -3910,13 +4146,11 @@ If Len(Error_Detail) > LONG_0 Then
 
 End If
 
-If Port_Entered Then PORT_LEAVE Port_Number
-
 TRANSMIT_BYTES = Temp_Result
 
 End Function
 
-Public Function RECEIVE_BYTES(Port_Number As Long, ByRef Receive_Data() As Byte, Optional Max_Bytes As Long = LONG_0, Optional Total_MilliSeconds As Long = LONG_0) As Long
+Public Function RECEIVE_BYTES(ByVal Port_Number As Long, ByRef Receive_Data() As Byte, Optional ByVal Max_Bytes As Long = LONG_0, Optional ByVal Total_MilliSeconds As Long = LONG_0) As Long
 '---------------------------------------------------------------------------
 Dim Port_Debug As Boolean: Const Module_Name As String = "RECEIVE_BYTES"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
@@ -3927,7 +4161,10 @@ If Port_Valid Then Port_Debug = COM_PORT(Port_Number).Debug
 ' embedded NUL bytes are preserved. Returns 0 with an unallocated array when nothing was received;
 ' returns -1 for an invalid, stopped or busy port, or when the read failed before any data arrived.
 ' Ends on read inactivity (same timers as RECEIVE_COM_PORT), the optional Max_Bytes / total
-' deadline bounds, a cooperative cancel, or read failure. Bytes already received are always kept.
+' deadline bounds, a cooperative cancel, or read failure. Bytes already received are kept on all of
+' these; after a trapped VBA runtime error the array is erased and -1 is returned. A busy port rejects
+' the call and leaves the caller's array untouched. A fixed-size array is rejected with -1 before any
+' data is consumed. Each read request is capped at the bytes still allowed, so Max_Bytes is exact.
 
 Dim Api_Result As Boolean, Failed As Boolean
 Dim Port_Entered As Boolean, Interrupted As Boolean, Limit_Reached As Boolean
@@ -3935,7 +4172,7 @@ Dim Error_Detail As String
 Dim Receive_Handle As LongPtr
 Dim Scratch(LONG_0 To 4095) As Byte                        ' fixed read buffer, one timeslice maximum
 Dim Receive_Start_Time As Currency, Last_Data_Time As Currency
-Dim Read_Request As Long, Bytes_Read As Long, Total_Bytes As Long, Capacity As Long
+Dim Read_Request As Long, This_Request As Long, Bytes_Read As Long, Total_Bytes As Long, Capacity As Long
 Dim Copy_Index As Long, Result_Count As Long
 
 Const INITIAL_CAPACITY As Long = 4096
@@ -3945,7 +4182,7 @@ Const Temp_Text_2 As String = " Receive Bytes, Read Failed "
 
 Result_Count = LONG_NEG_1
 
-Erase Receive_Data                                         ' caller's array starts empty in every outcome
+On Error GoTo Clean_Exit                                   ' armed first - the array handling below can raise
 
 If Port_Valid Then
 
@@ -3953,7 +4190,8 @@ If Port_Valid Then
 
   If Port_Entered Then
 
-    On Error GoTo Clean_Exit
+    ReDim Receive_Data(LONG_0 To LONG_0)                   ' probe: a fixed-size caller array raises here, before any data is consumed
+    Erase Receive_Data                                     ' caller's array starts empty (a busy port leaves it untouched)
 
     If Port_Started(Port_Number) Then
 
@@ -3972,7 +4210,12 @@ If Port_Valid Then
 
             Bytes_Read = LONG_0                            ' never assess a read using a stale byte count
 
-            Api_Result = (Synchronous_Read_Bytes(Receive_Handle, Scratch(LONG_0), Read_Request, Bytes_Read, NULL_POINTER) <> LONG_0)
+            This_Request = Read_Request                    ' cap the request at the bytes still allowed
+            If Max_Bytes > LONG_0 Then
+                If Max_Bytes - Total_Bytes < This_Request Then This_Request = Max_Bytes - Total_Bytes
+            End If
+
+            Api_Result = (Synchronous_Read_Bytes(Receive_Handle, Scratch(LONG_0), This_Request, Bytes_Read, NULL_POINTER) <> LONG_0)
 
             COM_PORT(Port_Number).DLL_Error = Err.LastDllError
             If Api_Result Then COM_PORT(Port_Number).DLL_Error = SYSTEM_ERRORS.SUCCESS
@@ -3985,7 +4228,7 @@ If Port_Valid Then
 
             End If
 
-            If Bytes_Read < LONG_0 Or Bytes_Read > Read_Request Then Failed = True: Exit Do   ' native count out of contract
+            If Bytes_Read < LONG_0 Or Bytes_Read > This_Request Then Failed = True: Exit Do   ' native count out of contract
 
             If Bytes_Read > LONG_0 Then
 
@@ -4010,7 +4253,7 @@ If Port_Valid Then
                 ' no data this pass - stop when the inactivity window expires
                 If (GET_HOST_MICROSECONDS - Last_Data_Time) > COM_PORT(Port_Number).Timers.Read_Wait_Time Then Exit Do
 
-                Kernel_Sleep_MilliSeconds COM_PORT(Port_Number).Timers.Exit_Loop_Wait
+                RECEIVE_SLEEP COM_PORT(Port_Number).Timers.Exit_Loop_Wait, Total_MilliSeconds, Receive_Start_Time
 
             End If
 
@@ -4066,27 +4309,39 @@ If Port_Valid Then
 
 Else
 
+    Erase Receive_Data                                     ' invalid port - caller's array is still emptied
     Call PRINT_INVALID_TEXT(Module_Name, Port_Number)
 
 End If
 
 Clean_Exit:
 
+If Port_Entered Then PORT_LEAVE Port_Number
+
 Error_Detail = TRAP_VBA_ERROR(Port_Number)
 
 If Len(Error_Detail) > LONG_0 Then
 
     Result_Count = LONG_NEG_1
-    Erase Receive_Data
+    ERASE_BYTES Receive_Data
     Call PRINT_DEBUG_TEXT(Module_Name, TEXT_ERROR, Error_Detail)
 
 End If
 
-If Port_Entered Then PORT_LEAVE Port_Number
-
 RECEIVE_BYTES = Result_Count
 
 End Function
+
+Private Sub ERASE_BYTES(Data() As Byte)
+
+' Erase from inside an active error handler. A locked caller array would raise again, and that second
+' error would escape to the caller, so this has its own handler.
+
+On Error Resume Next
+
+Erase Data
+
+End Sub
 
 Private Function BYTE_ARRAY_LENGTH(Data() As Byte) As Long
 
@@ -4102,6 +4357,25 @@ Exit Function
 Empty_Array:
 
 BYTE_ARRAY_LENGTH = LONG_0
+
+End Function
+
+Public Function PORT_LAST_ERROR(Port_Number As Long) As Long
+
+' Returns the Win32 error code from the most recent native call on this port, 0 if it succeeded, or -1
+' for an invalid port number. Use it to tell a failed operation from an empty result, for example a failed
+' read from no data. A call rejected because the port is busy or stopped makes no native call and leaves
+' this value unchanged. Trapped VBA runtime errors are not included.
+
+If Port_Number_Valid(Port_Number) Then
+
+    PORT_LAST_ERROR = COM_PORT(Port_Number).DLL_Error
+
+Else
+
+    PORT_LAST_ERROR = LONG_NEG_1
+
+End If
 
 End Function
 
@@ -4137,7 +4411,8 @@ Private Function PORT_ENTER(Port_Number As Long) As Boolean
 ' belonging to the first. PORT_ENTER claims the port for one operation and returns False if it is
 ' already claimed - the caller then rejects the operation instead of corrupting the one in progress.
 '
-' Ports are independent: activity on one port never blocks another.
+' The guard is independent per port: a busy port never blocks a call on another port. A long nested
+' operation on one port does, however, suspend an outer operation on any port while it yields.
 ' VBA yields cooperatively (only at DoEvents), so this test-and-set cannot be interrupted part way.
 '
 ' Public guarded functions must NOT call other public guarded functions for the same port -
@@ -4179,7 +4454,8 @@ Public Function CANCEL_COM_PORT(Port_Number As Long) As Boolean
 ' Requests cooperative cancellation of the operation currently running on this port.
 ' Intended to be called from a timer, event handler or Ribbon callback that runs while a long
 ' receive/transmit/wait is yielding through DoEvents. The active operation unwinds cleanly at its
-' next check and returns the data sent/received so far with a failure or partial result.
+' next check and returns the data sent/received so far with a failure or partial result. A transmit
+' that had already written every byte when the request arrived still returns True.
 ' Returns True if an operation was active and the request was recorded; False if the port was idle.
 
 If Port_Number_Valid(Port_Number) Then
@@ -4366,7 +4642,7 @@ Public Function TIMESTAMP() As String
 ' error handlers that call it, so it falls back to the bare VBA time on any error.
 
 Dim TIMESTAMP_TIME As SYSTEMTIME
-Dim TIMESTAMP_STRING As String * LONG_14
+Dim TIMESTAMP_STRING As String * LONG_16                   ' fits a 12-hour time: "12:34:56 PM.123" plus a separating space
 
 On Error GoTo Safe_Time
 
@@ -4452,7 +4728,7 @@ Const ERROR_TEXT_004 As String = "TOO MANY OPEN FILES"
 Const ERROR_TEXT_005 As String = "ACCESS DENIED"
 Const ERROR_TEXT_006 As String = "INVALID HANDLE"
 Const ERROR_TEXT_013 As String = "INVALID DATA"
-Const ERROR_TEXT_015 As String = "DEVICE NOT READY"
+Const ERROR_TEXT_021 As String = "DEVICE NOT READY"
 Const ERROR_TEXT_087 As String = "INVALID PARAMETER"
 Const ERROR_TEXT_122 As String = "INSUFFICIENT BUFFER"
 Const ERROR_TEXT_995 As String = "OPERATION ABORTED"
@@ -4472,7 +4748,7 @@ Case SYSTEM_ERRORS.INVALID_DATA:         Error_Text = ERROR_TEXT_013
 Case SYSTEM_ERRORS.ACCESS_DENIED:        Error_Text = ERROR_TEXT_005
 Case SYSTEM_ERRORS.PATH_NOT_FOUND:       Error_Text = ERROR_TEXT_003
 Case SYSTEM_ERRORS.FILE_NOT_FOUND:       Error_Text = ERROR_TEXT_002
-Case SYSTEM_ERRORS.DEVICE_NOT_READY:     Error_Text = ERROR_TEXT_015
+Case SYSTEM_ERRORS.DEVICE_NOT_READY:     Error_Text = ERROR_TEXT_021
 Case SYSTEM_ERRORS.INVALID_HANDLE:       Error_Text = ERROR_TEXT_006
 Case SYSTEM_ERRORS.INVALID_FUNCTION:     Error_Text = ERROR_TEXT_001
 Case SYSTEM_ERRORS.INVALID_PARAMETER:    Error_Text = ERROR_TEXT_087
@@ -4520,6 +4796,8 @@ Public Sub PRINT_DEBUG_TEXT(Module_Text As String, Result_Text As String, Messag
 
 Dim TEXT_COLUMN_1 As String * LONG_18
 Dim TEXT_COLUMN_2 As String * LONG_18
+
+On Error Resume Next                                       ' a diagnostic print must never itself raise
 
 TEXT_COLUMN_1 = Module_Text
 TEXT_COLUMN_2 = Result_Text
