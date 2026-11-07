@@ -1,0 +1,138 @@
+[new/M] module + Ribbon compile enabled after compile (False=clean): False
+[new/M] compile enabled after compile (False=clean): False
+[new/M] CLEAN '9600' => [9600]
+[new/M] CLEAN '9600,N,8,1' => [9600,N,8,1]
+[new/M] CLEAN 'baud=9600,parity=e' => [BAUD=9600 PARITY=E]
+[new/M] CLEAN 'BAUD = 9600' => [BAUD=9600]
+[new/M] SPC "9600" seed baud 1200 => res=True;applies=1;bits=1011;xon=17;xoff=19;baud=9600;par=0
+[new/M] SPC "9600,N,8,1" seed baud 1200 => res=True;applies=1;bits=1011;xon=17;xoff=19;baud=9600;par=0
+[new/M] SPC "baud=9600 parity=E" seed 4800 => res=True;applies=1;bits=3;xon=17;xoff=19;baud=9600;par=2
+[new/M] SPC "baud=9600 parity=N" seed 4800 xon=5 xoff=7 => res=True;applies=1;bits=1;xon=5;xoff=7;baud=9600;par=0
+[new/M] SPC "abc" => res=False;applies=0;bits=4800;xon=17;xoff=19;baud=1200;par=0
+[new/M] START no-settings seed 0x4800 => res=True;applies=1;bits=0;started=True;dll=0
+[new/M] START no-settings seed 0x4800 applyFails => res=True;applies=1;bits=4800;started=True;dll=0
+[new/M] START no-settings seed 0 (no apply expected) => res=True;applies=0;bits=0;started=True;dll=0
+[new/M] START trapped error after open => res=False;handle_nonzero=False;busy=False
+[new/M] START configure fail (dll error kept?) => res=False;handle=0;dll=87
+[new/M] START with stale caller Err => res=True
+[new/M] trapped CHECK (guard released, vba err kept) => r=-1;busy=False;vba=5
+[new/M] trapped CHECK + print raises => busy_after=False;err_seen_by_caller=0
+[new/M] STOP closed-handle => res=False;handle_nonzero=False;busy=False
+[new/M] DRAIN 10ms queue busy once => drained=True;polls=2
+[new/M] DRAIN deadline 500ms => r=False;ms=*
+[new/M] STOP drain times out => res=False;open=True;busy=False;purge=-1;abort=True;open_after=False;abort_purge=15
+[new/M] STOP drain empties => res=True;open=False;busy=False;purge=10
+[new/M] STOP drain cancelled => res=True;open=False;busy=False;purge=15
+[new/M] STOP drain status unreadable => res=False;open=True;busy=False;purge=-1;abort=True;open_after=False;abort_purge=15
+[new/M] RECEIVE reply arrives late => s=[ABC];ms_at_least_50=True
+[new/M] RECEIVE idle port => s=[];ms_at_least_50=True
+[new/M] DEBUG_COM_PORT(99) stale Err => r=False;err_after=0
+[new/M] SEND error => r=False;busy=False ; file=
+[new/M] SEND bytes => r=False;busy=False ; file=
+[new/M] SEND range1 => r=True;busy=False ; file=6869
+[new/M] SEND range2 => r=False;busy=False ; file=
+[new/M] SEND text => r=True;busy=False ; file=48656C6C6F
+[new/M] TX transmit => r=True ; file=48656C6C6F0D0A
+[new/M] TX put => r=True ; file=5A
+[new/M] TX bytes => r=True ; file=len=256 head=000102030405060708090A0B0C0D0E0F10111213 ... 256 bytes; count55=1 countAA=1
+[new/M] TX bytes_big => r=True ; file=len=2000 head=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA ... 2000 bytes; count55=0 countAA=2000
+[new/M] TX bytes_changed => r=False ; file=len=960 head=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA ... 960 bytes; count55=0 countAA=960
+[new/M] READ256 => len=256;0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,8364,129,8218,402,8222,8230,8224,8225,710,8240,352,8249,338,141,381,143,144,8216,8217,8220,8221,8226,8211,8212,732,8482,353,8250,339,157,382,376,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255,
+[new/M] READ256 sha1 => 39-06-3D-A9-40-8C-14-7C-06-E8-C1-BE-40-D1-6F-29-5A-7A-51-2A
+[new/M] RECV str max=1500 => n=1500;ms=*
+[new/M] RECV str max=7 => n=7;ms=*
+[new/M] RECV str unlimited => n=5000;ms=*
+[new/M] RECV str 3 bytes charWait=1000 total=100ms => n=3;ms=*
+[new/M] RECV str 3 bytes charWait=1000 max=3 => n=3;ms=*
+[new/M] RECV bytes max=1500 => n=1500;ms=*
+[new/M] RECV bytes max=7 => n=7;ms=*
+[new/M] RECV bytes unlimited => n=5000;ms=*
+[new/M] RECV bytes 3 bytes charWait=1000 total=100ms => n=3;ms=*
+[new/M] RECV bytes 3 bytes charWait=1000 max=3 => n=3;ms=*
+[new/M] RECEIVE_BYTES fixed array => fixed_r=-1;then_dynamic_r=5;busy=False;fixed0=7
+[new/M] RECEIVE_BYTES busy rejection => r=-1;array=2:789
+[new/M] RECEIVE_BYTES locked array => r=-1;err_seen_by_caller=0;busy=False
+[new/M] START no-settings seed 0x0400 => res=True;applies=1;bits=0;started=True;dll=0
+[new/M] RECEIVE_BYTES max byval (hook zeroes caller var) => n=1500
+[new/M] WAITS 9600 => bps=960;exit=4;char=10;data=40;line=200;slice=960
+[new/M] WAITS 115200 => bps=11519;exit=2;char=5;data=20;line=100;slice=4096
+[new/M] WAITS 921600 => bps=92159;exit=2;char=5;data=20;line=22;slice=4096
+[new/M] DLL_ERROR_TEXT 21|15 => Last DLL Error 21 = DEVICE NOT READY | Last DLL Error 15 = UNKNOWN SYSTEM ERROR CODE 
+[new/M] SHOW_DCB bits=0x4000 => Bits 15-31                   |= 0      Bits 15-31 unused
+[new/M] SHOW_DCB bits=0x8000 => Bits 15-31                   |= 32768      Bits 15-31 unused
+[new/M] SHOW_PORT_ERRORS clear fails => r=False :: SHOW_PORT_ERRORS|FAILURE| Clear Comms Error Failed, Last DLL Error 87 = INVALID PARAMETER // COM_PORT_ERRORS|PARITY| Hardware Parity Error |= True // COM_PORT_ERRORS|FRAMING| Hardware Framing Error |= False // 
+[new/M] ALIASES => Port_Ready(1)=False;Port_Valid(1)=True;Port_Valid(99)=False
+[new/M] PORT_LAST_ERROR => invalid=-1;no_data=0;check=-1;clear_fail=87;recovered=0;get_closed=[]6;start_missing=False:2;start_cfgfail=False:87
+[new/M] HELPER bits 0x4801 xon=xoff=0 => bits=1;xon=17;xoff=19
+[new/M] HELPER bits 0xFFFF xon=5 xoff=7 => bits=B3FF;xon=5;xoff=7
+[new/M] HELPER xon=xoff=3 => bits=0;xon=17;xoff=19
+[new/M] HELPER bits 0x0401 => bits=1;xon=17;xoff=19
+[new/ND] module + Ribbon compile enabled after compile (False=clean): False
+[new/ND] compile enabled after compile (False=clean): False
+[new/ND] CLEAN '9600' => [9600]
+[new/ND] CLEAN '9600,N,8,1' => [9600,N,8,1]
+[new/ND] CLEAN 'baud=9600,parity=e' => [BAUD=9600 PARITY=E]
+[new/ND] CLEAN 'BAUD = 9600' => [BAUD=9600]
+[new/ND] SPC "9600" seed baud 1200 => res=True;applies=1;bits=1011;xon=17;xoff=19;baud=9600;par=0
+[new/ND] SPC "9600,N,8,1" seed baud 1200 => res=True;applies=1;bits=1011;xon=17;xoff=19;baud=9600;par=0
+[new/ND] SPC "baud=9600 parity=E" seed 4800 => res=True;applies=1;bits=3;xon=17;xoff=19;baud=9600;par=2
+[new/ND] SPC "baud=9600 parity=N" seed 4800 xon=5 xoff=7 => res=True;applies=1;bits=1;xon=5;xoff=7;baud=9600;par=0
+[new/ND] SPC "abc" => res=False;applies=0;bits=4800;xon=17;xoff=19;baud=1200;par=0
+[new/ND] START no-settings seed 0x4800 => res=True;applies=1;bits=0;started=True;dll=n/a
+[new/ND] START no-settings seed 0x4800 applyFails => res=True;applies=1;bits=4800;started=True;dll=n/a
+[new/ND] START no-settings seed 0 (no apply expected) => res=True;applies=0;bits=0;started=True;dll=n/a
+[new/ND] START trapped error after open => res=False;handle_nonzero=False;busy=False
+[new/ND] START configure fail (dll error kept?) => res=False;handle=0;dll=n/a
+[new/ND] START with stale caller Err => res=True
+[new/ND] trapped CHECK (guard released, vba err kept) => r=-1;busy=False;vba=n/a
+[new/ND] trapped CHECK + print raises => busy_after=False;err_seen_by_caller=0
+[new/ND] STOP closed-handle => res=False;handle_nonzero=False;busy=False
+[new/ND] DRAIN 10ms queue busy once => drained=True;polls=2
+[new/ND] DRAIN deadline 500ms => r=False;ms=*
+[new/ND] STOP drain times out => res=False;open=True;busy=False;purge=-1;abort=True;open_after=False;abort_purge=15
+[new/ND] STOP drain empties => res=True;open=False;busy=False;purge=10
+[new/ND] STOP drain cancelled => res=True;open=False;busy=False;purge=15
+[new/ND] STOP drain status unreadable => res=False;open=True;busy=False;purge=-1;abort=True;open_after=False;abort_purge=15
+[new/ND] RECEIVE reply arrives late => s=[ABC];ms_at_least_50=True
+[new/ND] RECEIVE idle port => s=[];ms_at_least_50=True
+[new/ND] DEBUG_COM_PORT(99) stale Err => r=False;err_after=5
+[new/ND] SEND error => r=False;busy=False ; file=
+[new/ND] SEND bytes => r=False;busy=False ; file=
+[new/ND] SEND range1 => r=True;busy=False ; file=6869
+[new/ND] SEND range2 => r=False;busy=False ; file=
+[new/ND] SEND text => r=True;busy=False ; file=48656C6C6F
+[new/ND] TX transmit => r=True ; file=48656C6C6F0D0A
+[new/ND] TX put => r=True ; file=5A
+[new/ND] TX bytes => r=True ; file=len=256 head=000102030405060708090A0B0C0D0E0F10111213 ... 256 bytes; count55=1 countAA=1
+[new/ND] TX bytes_big => r=True ; file=len=2000 head=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA ... 2000 bytes; count55=0 countAA=2000
+[new/ND] TX bytes_changed => r=False ; file=len=960 head=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA ... 960 bytes; count55=0 countAA=960
+[new/ND] READ256 => len=256;0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,8364,129,8218,402,8222,8230,8224,8225,710,8240,352,8249,338,141,381,143,144,8216,8217,8220,8221,8226,8211,8212,732,8482,353,8250,339,157,382,376,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255,
+[new/ND] READ256 sha1 => 39-06-3D-A9-40-8C-14-7C-06-E8-C1-BE-40-D1-6F-29-5A-7A-51-2A
+[new/ND] RECV str max=1500 => n=1500;ms=*
+[new/ND] RECV str max=7 => n=7;ms=*
+[new/ND] RECV str unlimited => n=5000;ms=*
+[new/ND] RECV str 3 bytes charWait=1000 total=100ms => n=3;ms=*
+[new/ND] RECV str 3 bytes charWait=1000 max=3 => n=3;ms=*
+[new/ND] RECV bytes max=1500 => n=1500;ms=*
+[new/ND] RECV bytes max=7 => n=7;ms=*
+[new/ND] RECV bytes unlimited => n=5000;ms=*
+[new/ND] RECV bytes 3 bytes charWait=1000 total=100ms => n=3;ms=*
+[new/ND] RECV bytes 3 bytes charWait=1000 max=3 => n=3;ms=*
+[new/ND] RECEIVE_BYTES fixed array => fixed_r=-1;then_dynamic_r=5;busy=False;fixed0=7
+[new/ND] RECEIVE_BYTES busy rejection => r=-1;array=2:789
+[new/ND] RECEIVE_BYTES locked array => r=-1;err_seen_by_caller=0;busy=False
+[new/ND] START no-settings seed 0x0400 => res=True;applies=1;bits=0;started=True;dll=n/a
+[new/ND] RECEIVE_BYTES max byval (hook zeroes caller var) => n=1500
+[new/ND] WAITS 9600 => bps=960;exit=4;char=10;data=40;line=200;slice=960
+[new/ND] WAITS 115200 => bps=11519;exit=2;char=5;data=20;line=100;slice=4096
+[new/ND] WAITS 921600 => bps=92159;exit=2;char=5;data=20;line=22;slice=4096
+[new/ND] DLL_ERROR_TEXT 21|15 => n/a
+[new/ND] SHOW_DCB bits=0x4000 => n/a
+[new/ND] SHOW_DCB bits=0x8000 => n/a
+[new/ND] SHOW_PORT_ERRORS clear fails => n/a
+[new/ND] ALIASES => Port_Started(1)=False;Port_Number_Valid(1)=True;Port_Number_Valid(99)=False;MS>0=True;PAR(2)=E;STOP(1)=1.5
+[new/ND] PORT_LAST_ERROR => invalid=-1;no_data=0;check=-1;clear_fail=87;recovered=0;get_closed=[]6;start_missing=False:2;start_cfgfail=False:87
+[new/ND] HELPER bits 0x4801 xon=xoff=0 => bits=1;xon=17;xoff=19
+[new/ND] HELPER bits 0xFFFF xon=5 xoff=7 => bits=B3FF;xon=5;xoff=7
+[new/ND] HELPER xon=xoff=3 => bits=0;xon=17;xoff=19
+[new/ND] HELPER bits 0x0401 => bits=1;xon=17;xoff=19

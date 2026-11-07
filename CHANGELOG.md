@@ -11,16 +11,19 @@ All notable changes to the serial-port modules (`SERIAL_PORT_VBA.bas` and
 - **Settings.** The cleaner replaces commas with spaces only when the string contains `=`, so `9600,N,8,1` now
   works; a new helper clears `fErrorChar`/`fNull`/`fAbortOnError` and sets XON=17/XOFF=19 only when the two chars
   are equal; the settings path also sets `fBinary` and sets/clears `fParity` from PARITY (`BuildCommDCB` leaves
-  `fParity` clear, so parity errors were not reported); the no-settings path only touches the DCB if one of those
+  `fParity` unchanged, so parity errors went unreported on a port that had it clear); the no-settings path only touches the DCB if one of those
   three flags is set, and a failure there does not fail the start and re-reads the DCB so the stored copy stays
   accurate.
 - **Guard.** `PORT_LEAVE` is the first statement after `Clean_Exit:` in all guarded functions so a logging
   failure cannot leave the guard stuck; `START_COM_PORT` closes a port it opened itself after a trapped error
   and clears Err at entry; `STOP_PORT_CORE` clears Name/Handle when CloseHandle fails with INVALID_HANDLE (6) so
-  an entry cannot be wedged (No-Debug: captures `Err.LastDllError` locally and `PURGE_BUFFERS` moved into the
-  success branch); `DRAIN_PORT_OUTPUT` polls the queue once more after the last sleep; cleanup that runs inside an
+  an entry cannot be wedged (No-Debug: `PURGE_BUFFERS` moved into the success branch); `DRAIN_PORT_OUTPUT` polls
+  the queue once more after the last sleep and now counts elapsed time, so Sleep overruns and yields no longer extend
+  the deadline; `TRANSMIT_COM_PORT` and `CHECK_COM_PORT` yield before releasing the guard, so a status query cannot
+  replace the last error before the caller reads it; a failed start keeps a handle it could not close, unless the
+  handle was already invalid; cleanup that runs inside an
   active error handler moved to helpers with their own handlers, so a second error cannot escape from it.
-  *(Main module only:)* START preserves the configure `DLL_Error` across `STOP_PORT_CORE`, `DEBUG_COM_PORT` guards
+  START preserves the configure `DLL_Error` across `STOP_PORT_CORE`. *(Main module only:)* `DEBUG_COM_PORT` guards
   its port-valid test, and `PRINT_DEBUG_TEXT` can no longer raise.
 - **Data path.** `SEND_COM_PORT` rejects error values and arrays and reads Range values; the
   `TRANSMIT_PORT_CORE` text parameter is `ByVal`, and `PUT_COM_PORT`/core fail without sending when text converts
@@ -28,7 +31,7 @@ All notable changes to the serial-port modules (`SERIAL_PORT_VBA.bas` and
   is still sent as a substitute such as `?`, so use `TRANSMIT_BYTES` when exact bytes matter);
   `SYNCHRONOUS_READ_COM_PORT` reads through a byte
   buffer and keeps only bytes received; `RECEIVE_BYTES` arms its error handler first, leaves the array untouched
-  on a busy rejection and probes the array before consuming data; `Max_Bytes` is exact in both receive
+  on a busy rejection and probes the array before consuming data, leaving a rejected fixed-size array unchanged; `Max_Bytes` is exact in both receive
   functions; `RECEIVE_COM_PORT` tests the limit right after accumulating and skips the sleep, and a new shared
   sleep helper clamps waits to the remaining `Total_MilliSeconds`; `SET_PORT_VALUES` caps loop waits at about
   2048 bytes of line time (no change below 230400 baud); `TRANSMIT_BYTES` fails if the array changes during a
@@ -45,10 +48,13 @@ All notable changes to the serial-port modules (`SERIAL_PORT_VBA.bas` and
 
 ### Changed
 
-- **Graceful stop no longer discards data and reports success (behaviour change).** `STOP_COM_PORT(Port, Drain)`
-  used to purge and close after a drain timeout and return `True`. It now returns `False` and leaves the port open
-  with nothing discarded, so the caller can retry or abort with no drain time. A cancel request during the wait
-  still forces the abort close. `STOP_COM_PORT(Port)` is unchanged.
+- **Graceful stop (behaviour change).** `STOP_COM_PORT(Port, Drain)` used to purge everything and close after a
+  drain timeout and return `True`. If the driver still reports queued data it now returns `False` and leaves the port
+  open with nothing discarded, so the caller can retry or abort with no drain time. After a completed wait it purges
+  receive data only. A cancel request during the wait still forces the abort close. `STOP_COM_PORT(Port)` is
+  unchanged. **Limitation:** Microsoft documents the queue count as zero for a non-overlapped write, which these
+  modules use, so on a real port the wait can end at once and `True` does not prove delivery. This has not been
+  tested on hardware.
 - **`RECEIVE_COM_PORT` waits for a reply (behaviour change).** Its inactivity window now starts at the call, as in
   `RECEIVE_BYTES`. It used to run from the last data ever received, so a transmit followed by a receive could
   return empty even if the reply arrived 20 mS later. Empty polls now take as long as the read exit timer.
@@ -85,14 +91,14 @@ All notable changes to the serial-port modules (`SERIAL_PORT_VBA.bas` and
 
 ### How this was tested
 
-Both modules compile clean in Excel 16 with the Ribbon module. A throwaway harness (not part of this repo) ran
-them against a temporary file handle: `ReadFile` and `WriteFile` were real, `BuildCommDCB` was real, and
-`GetCommState`, `SetCommState`, `SetCommTimeouts`, `ClearCommError` and `EscapeCommFunction` were stubbed. No COM
-port was opened.
+Both modules compile clean with the Ribbon module on 64-bit Office 2021 (Excel 16.0 build 20326). The harness in
+[Tests](Tests) ran them against a temporary file handle: `ReadFile` and `WriteFile` were real, `BuildCommDCB` was
+real, and `GetCommState`, `SetCommState`, `SetCommTimeouts`, `ClearCommError` and `EscapeCommFunction` were
+stubbed. No COM port was opened.
 
 **Untested on hardware:** the drain-timeout result, the DCB flag changes on both settings paths, short and comma settings on a real port,
 the drain loop against a real queue, real `ClearCommError` paths, cancellation under live traffic, STOP after a
-real `INVALID_HANDLE`, the receive wait caps at high baud, and everything on 64-bit Office. The double-byte
+real `INVALID_HANDLE`, the receive wait caps at high baud, and everything on 32-bit Office. The double-byte
 rejection cannot trigger on this single-byte test host, and the Ribbon callbacks were compiled but not run because
 they show message boxes.
 

@@ -99,10 +99,12 @@ therefore has a non-blocking operation guard:
 * `stop_com_port(1)` on a busy port automatically requests cancellation and returns `False` — call it again
   once the operation has unwound: retry after returning from the callback, for example with `Application.OnTime`,
   never in a loop inside the callback. `stop_com_port(1, 2000)` drains the transmit queue (graceful close) before
-  closing. If data is still queued after that time it returns `False` and leaves the port open with nothing
-  discarded, so you can retry or abort. The default remains an abort close.
-* `port_last_error(1)` returns the Win32 error from the most recent native call on the port, so a failed read can
-  be told apart from no data.
+  closing. If the driver still reports queued data after that time it returns `False` and leaves the port open
+  with nothing discarded, so you can retry or abort. The default remains an abort close. `True` does not prove
+  delivery: the driver may report an empty queue at once on these non-overlapped handles, so have the device
+  acknowledge if delivery matters.
+* `port_last_error(1)` returns the Win32 error from the most recent operation on the port, so a failed read can
+  be told apart from no data. Read it straight after the call, because the next operation replaces it.
 * `clear_port_busy(1)` is a recovery-only escape hatch after a VBE Ctrl-Break (break mode only). A VBE Reset or
   `End` loses the stored port handle while the OS port stays open, so the host application must be closed to
   release it.
@@ -132,6 +134,10 @@ therefore has a non-blocking operation guard:
 
 `SERIAL_PORT_TEST_MAIN.xlsm` and `SERIAL_PORT_TEST_NODEBUG.xlsm` contain the two modules imported and
 compiled on Office 16.0, with headless smoke tests passed (invalid port numbers only — no hardware touched).
+
+[Tests](Tests) holds a harness that runs both modules in Excel against a temporary file, with the Windows port
+calls stubbed. It catches logic regressions but says nothing about real hardware. It has only been run on 64-bit
+Office.
 
 **Never import both modules into the same VBA project** — they share public names by design.
 

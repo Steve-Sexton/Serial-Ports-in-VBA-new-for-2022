@@ -197,7 +197,7 @@ Private Type COM_PORT_TIMERS
              Read_Timeout As Boolean
              Timeslice_Bytes As Long                       ' Approximate bytes per second for timesliced synchronous read/write
              Bytes_Per_Second As Long
-             Port_Data_Time As Currency                    ' Currency-scaled time in QPC MicroSeconds of > 0 bytes read
+             Port_Data_Time As Currency                    ' Currency-scaled QPC MicroSeconds of the last read of > 0 bytes, or of the start of RECEIVE_COM_PORT
              Last_Data_Time As Currency                    ' Currency-scaled time in QPC MicroSeconds since Port_Data_Time
              Read_Wait_Time As Currency                    ' Currency-scaled time in QPC MicroSeconds of read wait before timeout
              Timing_QPC_Now As Currency                    ' Currency-scaled time in QPC MicroSeconds for timing data start
@@ -507,7 +507,7 @@ If Len(Error_Detail) > LONG_0 Then
     Result_Text = TEXT_ERROR
     Detail_Text = Error_Detail
 
-    If Opened_Here Then ABANDON_OPENED_PORT Port_Number        ' this call opened the port - never leave it open after a failed start
+    If Opened_Here Then ABANDON_OPENED_PORT Port_Number        ' this call opened the port - close it after a failed start
 
 End If
 
@@ -743,14 +743,22 @@ Private Sub ABANDON_OPENED_PORT(Port_Number As Long)
 
 ' Closes a port after a runtime error in the call that opened it. Not STOP_PORT_CORE - that yields.
 ' Has its own handler because an On Error statement inside a handler that is already active has no effect.
+' The handle is kept if the close failed, unless it was already invalid, so a later stop can still try.
+
+Dim Closed As Boolean
 
 On Error Resume Next
 
 If COM_PORT(Port_Number).Handle <> LONG_0 Then
 
-    CLOSE_PORT_HANDLE Port_Number
-    COM_PORT(Port_Number).Name = vbNullString
-    COM_PORT(Port_Number).Handle = LONG_0
+    Closed = CLOSE_PORT_HANDLE(Port_Number)
+
+    If Closed Or COM_PORT(Port_Number).DLL_Error = SYSTEM_ERRORS.INVALID_HANDLE Then
+
+        COM_PORT(Port_Number).Name = vbNullString
+        COM_PORT(Port_Number).Handle = LONG_0
+
+    End If
 
 End If
 
@@ -1002,10 +1010,13 @@ Dim Port_Debug As Boolean: Const Module_Name As String = "STOP_COM_PORT"
 Dim Port_Valid As Boolean: Port_Valid = Port_Number_Valid(Port_Number)
 If Port_Valid Then Port_Debug = COM_PORT(Port_Number).Debug
 '-----------------------------------------------------------------------
-' Drain_MilliSeconds = 0 (default) is an abort close - queued transmit and unread receive data are purged.
-' Drain_MilliSeconds > 0 is a graceful close - waits up to that time for the transmit queue to empty first.
-' If the queue does not empty, nothing is discarded: the port stays open and the result is False. Retry, or
-' stop with no drain time to abort. A cancel request during the wait forces the abort close.
+' Drain_MilliSeconds of 0 or less (default 0) is an abort close - queued transmit and unread receive data are purged.
+' Drain_MilliSeconds > 0 is a graceful close - waits up to that time for the driver's transmit queue to empty.
+' If the driver still reports queued data, nothing is discarded: the port stays open and the result is False.
+' Retry, or stop with no drain time to abort. A cancel request during the wait forces the abort close.
+' The wait only covers what the driver reports. The count is documented as zero for a non-overlapped write,
+' which is what this module uses, so the wait can end at once. After the wait only receive data is purged.
+' True therefore does not prove delivery - have the device acknowledge if that matters.
 
 Dim Temp_Result As Boolean, Port_Entered As Boolean, Error_Detail As String
 
@@ -1101,13 +1112,13 @@ If Drain_MilliSeconds > LONG_0 And Not Drained And Not COM_PORT(Port_Number).Can
 
 Else
 
-    PURGE_COM_PORT Port_Number
+    If Drained Then PURGE_RECEIVE_QUEUE Port_Number Else PURGE_COM_PORT Port_Number
 
     If CLOSE_PORT_HANDLE(Port_Number) Then
 
+        COM_PORT(Port_Number).Handle = LONG_0                  ' closed - cleared first so a later failure cannot leave a stale handle
         PURGE_BUFFERS Port_Number
         COM_PORT(Port_Number).Name = vbNullString
-        COM_PORT(Port_Number).Handle = LONG_0
         Detail_Text = Stop_Text_2 & Temp_Handle
         Result_Text = TEXT_SUCCESS
         Temp_Result = True
@@ -1143,17 +1154,34 @@ STOP_PORT_CORE = Temp_Result
 
 End Function
 
+Private Function PURGE_RECEIVE_QUEUE(Port_Number As Long) As Boolean
+
+' Graceful close: clears unread receive data only. The transmit purge flags would discard any bytes the
+' driver still holds after reporting an empty transmit queue.
+
+Dim Temp_Result As Boolean
+
+Const PURGE_RX_ABORT_AND_CLEAR As Long = LONG_10           ' PURGE_RXABORT (2) Or PURGE_RXCLEAR (8)
+
+Temp_Result = (Com_Port_Purge(COM_PORT(Port_Number).Handle, PURGE_RX_ABORT_AND_CLEAR) <> LONG_0)
+COM_PORT(Port_Number).DLL_Error = IIf(Temp_Result, LONG_0, Err.LastDllError)
+
+PURGE_RECEIVE_QUEUE = Temp_Result
+
+End Function
+
 Private Function DRAIN_PORT_OUTPUT(Port_Number As Long, Drain_MilliSeconds As Long) As Boolean
 '-----------------------------------------------------------------------
 ' waits up to Drain_MilliSeconds for queued transmit data to leave the driver output queue.
 ' returns True if the output queue emptied within the deadline.
 
 Dim Queue_Empty As Boolean, Clear_Result As Boolean
-Dim Wait_Remaining As Long, Sleep_Time As Long
+Dim Sleep_Time As Long
+Dim Deadline As Currency, Time_Left As Currency
 
 Const Loop_Time As Long = LONG_10                          ' MilliSeconds
 
-Wait_Remaining = Drain_MilliSeconds
+Deadline = GET_HOST_MICROSECONDS + CCur(Drain_MilliSeconds) * LONG_1000   ' elapsed time - Sleep overruns and yields both count
 
 Do
 
@@ -1171,15 +1199,16 @@ Do
 
     If COM_PORT(Port_Number).Cancel_Requested Then Exit Do ' cancel promotes the graceful close to an abort
 
-    If Wait_Remaining < LONG_1 Then Exit Do                ' deadline reached - the queue was polled once more after the last sleep
+    Time_Left = Deadline - GET_HOST_MICROSECONDS
 
-    Sleep_Time = IIf(Wait_Remaining < Loop_Time, Wait_Remaining, Loop_Time)
+    If Time_Left <= LONG_0 Then Exit Do                    ' deadline reached - the queue was polled once more after the last sleep
+
+    Sleep_Time = Loop_Time
+    If Time_Left < CCur(Loop_Time) * LONG_1000 Then Sleep_Time = Int(Time_Left / LONG_1000) + LONG_1
 
     Kernel_Sleep_MilliSeconds Sleep_Time
 
     DoEvents                                               ' yield so a cancel can arrive and Office stays responsive
-
-    Wait_Remaining = Wait_Remaining - Sleep_Time
 
 Loop
 
@@ -1492,7 +1521,7 @@ Const Temp_Text_07 As String = " Read Buffer Data, Waiting "
 Const Temp_Text_08 As String = " Read Buffer Line, Waiting "
 Const Temp_Text_09 As String = " Read Buffer Full, Looping "
 Const Temp_Text_10 As String = " Effective Bytes/Second = "
-Const Temp_Text_11 As String = " Last Data MicroSeconds = "
+Const Temp_Text_11 As String = " MicroSeconds Since Last Data or Receive Start = "
 Const Temp_Text_12 As String = " Read Wait MicroSeconds = "
 Const Temp_Text_13 As String = " Receive   MicroSeconds = "
 Const Temp_Text_14 As String = " Receive   Byte Count   = "
@@ -1730,6 +1759,8 @@ Else
 
 End If
 
+DoEvents                                                   ' yields while the guard is held, so a status query cannot reset the last error before the caller reads it
+
 Clean_Exit:
 
 If Port_Entered Then PORT_LEAVE Port_Number
@@ -1742,8 +1773,6 @@ If Len(Error_Detail) > LONG_0 Then
     Call PRINT_DEBUG_TEXT(Module_Name, TEXT_ERROR, Error_Detail)
 
 End If
-
-DoEvents
 
 TRANSMIT_COM_PORT = Temp_Result
 
@@ -2757,6 +2786,8 @@ Else
 
 End If
 
+DoEvents                                                   ' yields while the guard is held, so a status query cannot reset the last error before the caller reads it
+
 Clean_Exit:
 
 If Port_Entered Then PORT_LEAVE Port_Number
@@ -2769,8 +2800,6 @@ If Len(Error_Detail) > LONG_0 Then
     Call PRINT_DEBUG_TEXT(Module_Name, TEXT_ERROR, Error_Detail)
 
 End If
-
-DoEvents
 
 CHECK_COM_PORT = Temp_Queue
 
@@ -4164,9 +4193,9 @@ If Port_Valid Then Port_Debug = COM_PORT(Port_Number).Debug
 ' deadline bounds, a cooperative cancel, or read failure. Bytes already received are kept on all of
 ' these; after a trapped VBA runtime error the array is erased and -1 is returned. A busy port rejects
 ' the call and leaves the caller's array untouched. A fixed-size array is rejected with -1 before any
-' data is consumed. Each read request is capped at the bytes still allowed, so Max_Bytes is exact.
+' data is consumed, and keeps its contents. Each read request is capped at the bytes still allowed, so Max_Bytes is exact.
 
-Dim Api_Result As Boolean, Failed As Boolean
+Dim Api_Result As Boolean, Failed As Boolean, Array_Resizable As Boolean
 Dim Port_Entered As Boolean, Interrupted As Boolean, Limit_Reached As Boolean
 Dim Error_Detail As String
 Dim Receive_Handle As LongPtr
@@ -4192,6 +4221,7 @@ If Port_Valid Then
 
     ReDim Receive_Data(LONG_0 To LONG_0)                   ' probe: a fixed-size caller array raises here, before any data is consumed
     Erase Receive_Data                                     ' caller's array starts empty (a busy port leaves it untouched)
+    Array_Resizable = True
 
     If Port_Started(Port_Number) Then
 
@@ -4323,7 +4353,7 @@ Error_Detail = TRAP_VBA_ERROR(Port_Number)
 If Len(Error_Detail) > LONG_0 Then
 
     Result_Count = LONG_NEG_1
-    ERASE_BYTES Receive_Data
+    If Array_Resizable Then ERASE_BYTES Receive_Data       ' a rejected fixed-size array keeps its contents
     Call PRINT_DEBUG_TEXT(Module_Name, TEXT_ERROR, Error_Detail)
 
 End If
@@ -4362,10 +4392,12 @@ End Function
 
 Public Function PORT_LAST_ERROR(Port_Number As Long) As Long
 
-' Returns the Win32 error code from the most recent native call on this port, 0 if it succeeded, or -1
+' Returns the Win32 error code recorded by the most recent operation on this port, 0 if it succeeded, or -1
 ' for an invalid port number. Use it to tell a failed operation from an empty result, for example a failed
-' read from no data. A call rejected because the port is busy or stopped makes no native call and leaves
-' this value unchanged. Trapped VBA runtime errors are not included.
+' read from no data. Read it straight after the call: the next operation replaces it, including a modem
+' status query such as DEVICE_READY on an idle port. A status query while the port is busy records nothing.
+' A call rejected because the port is busy or stopped makes no native call and leaves this value unchanged.
+' Trapped VBA runtime errors are not included.
 
 If Port_Number_Valid(Port_Number) Then
 
@@ -4803,6 +4835,8 @@ TEXT_COLUMN_1 = Module_Text
 TEXT_COLUMN_2 = Result_Text
 
 Debug.Print TIMESTAMP & TEXT_COLUMN_1 & TEXT_COLUMN_2 & Message_Text
+
+Err.Clear                                                  ' a swallowed print failure must not look like a failure of the caller
 
 End Sub
 
