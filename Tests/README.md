@@ -3,6 +3,9 @@
 These tests run the VBA modules in Excel without a serial port. They catch logic regressions. They do not show
 that the modules work with real hardware.
 
+There are two tests here. `run_tests.ps1` needs no serial port and checks logic. `run_loopback.ps1` is the only
+test that touches a real port: run it on your ports before relying on the 2026 revision of the modules.
+
 **Do not import anything from this folder into a workbook you use.** `tests.bas` only works inside the test
 builds that `mk_test.py` makes, which replace the Windows port calls with stubs.
 

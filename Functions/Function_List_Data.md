@@ -27,7 +27,7 @@ First parameter (1) is a valid[^1] and started COM Port number on host PC.
 * Functions shown as TS=No return within a few milliseconds. 
 * Functions shown as TS=Yes are timesliced to avoid VBA hanging with a 'not responding' message.
 
-[^1]:  Valid Minimum and Maximum port numbers should be defined in declarations section at the start of the module. 
+[^1]:  Valid Minimum and Maximum port numbers should be defined in declarations section at the start of the module. Both modules default to 1 and 2 (COM1 and COM2), so change `COM_PORT_MIN` and `COM_PORT_MAX` to use other ports. 
 
 [^2]:  Maximum number of waiting characters read is the smaller of approximately (baud rate / 10) and 4096  
        

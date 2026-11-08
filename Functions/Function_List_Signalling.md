@@ -37,7 +37,7 @@ First parameter (1) is a valid[^1] COM Port number on host PC
  * Functions return True if port valid, started and Windows [EscapeCommFunction](https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-escapecommfunction) returned True 
  * Output-signal functions are rejected (return False) while another operation is running on the same port; input-signal functions can run at any time and never disturb an in-progress operation.
 
-[^1]: Valid Minimum and Maximum port numbers should be defined in declarations section at the start of the module.
+[^1]: Valid Minimum and Maximum port numbers should be defined in declarations section at the start of the module. Both modules default to 1 and 2 (COM1 and COM2), so change `COM_PORT_MIN` and `COM_PORT_MAX` to use other ports.
 [^4]: RESETDEV, defined in the Windows SDK (winbase.h); omitted from the online EscapeCommFunction table.
 [^2]: Receive Line Signal Detect
 [^3]: see - [Escape Comm Function signal values](https://docs.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-escapecommfunction)

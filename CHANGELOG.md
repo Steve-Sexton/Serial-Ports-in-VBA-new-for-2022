@@ -42,6 +42,9 @@ All notable changes to the serial-port modules (`SERIAL_PORT_VBA.bas` and
 
 ### Added
 
+- **Tests.** `Tests/run_tests.ps1` runs both modules in Excel against a temporary file, with the Windows port calls
+  stubbed, and compares 138 results with `Tests/expected_results.txt`. `Tests/run_loopback.ps1` runs the real
+  modules on a real or virtual port pair or a loopback plug. See [Tests/README.md](Tests/README.md).
 - **`PORT_LAST_ERROR(Port)`** returns the Win32 error from the most recent native call on the port (0 = success,
   -1 = invalid port), so a failed read can be told apart from no data. The No-Debug module now records native
   errors per port to support it.
@@ -88,6 +91,9 @@ All notable changes to the serial-port modules (`SERIAL_PORT_VBA.bas` and
 - Settings documented: short strings such as `9600`, comma form `9600,N,8,1`, `key=value` cleaning, and
   unrecognised strings failing the start.
 - Ribbon How-To tab name corrected to "COM Port 1".
+- README: a validation-status notice, upgrade notes for existing macros, a Testing section, and the default COM1-COM2
+  port range. New [helper function list](Functions/Function_List_Helpers.md) covering the public helpers that were
+  undocumented.
 
 ### How this was tested
 
@@ -101,6 +107,24 @@ the drain loop against a real queue, real `ClearCommError` paths, cancellation u
 real `INVALID_HANDLE`, the receive wait caps at high baud, and everything on 32-bit Office. The double-byte
 rejection cannot trigger on this single-byte test host, and the Ribbon callbacks were compiled but not run because
 they show message boxes.
+
+### Required before release
+
+This revision is not validated until the loopback test has been run on real ports. Run
+`Tests/run_loopback.ps1` with both modules:
+
+- on each kind of port it will be used with, for example a USB adapter pair or a null-modem pair, not only a
+  virtual pair, because com0com does not model parity or baud-rate timing
+- on 32-bit Office as well as 64-bit, if both are in use
+- with RTS wired to CTS, or on a pair, so the flow-control test runs
+
+Expect no FAIL. Then read the INFO lines:
+
+- `flow_control_graceful_stop` shows whether a graceful stop really waits for queued data on that driver
+- `late_reply_timing` shows whether a write returns before the data is sent
+- `parity_detection` should report parity errors on a real UART pair
+
+Cancellation under live traffic and unplugging a USB adapter still need a manual check.
 
 ## [2026-07-23] — Hardening revision
 

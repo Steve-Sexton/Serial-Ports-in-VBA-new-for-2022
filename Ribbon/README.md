@@ -78,5 +78,9 @@ Check online for further information on supported icon types and sizes for your 
 
 #### Application Development
 
-Further VBA and Ribbon XML development is required to make the final document suitable for your intended use.  
+Further VBA and Ribbon XML development is required to make the final document suitable for your intended use.
+
+In the 2026 revision, the Stop, Read and Check buttons show a "port busy" message when a port operation is already
+running, and the Send button reports a failed send. The Ribbon module has been compiled with both serial modules,
+but its buttons have not been clicked in testing, and nothing has been run on a real port yet.
 

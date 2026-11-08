@@ -27,7 +27,7 @@ First parameter (1) is a valid[^1] COM Port number on host PC
 * Debug functions return `True` or `False` to indicate debug state
 * Other functions return `True` or `False` to indicate success or failure
 
-[^1]: Valid Minimum and Maximum port numbers should be defined in declarations section at the start of the module. 
+[^1]: Valid Minimum and Maximum port numbers should be defined in declarations section at the start of the module. Both modules default to 1 and 2 (COM1 and COM2), so change `COM_PORT_MIN` and `COM_PORT_MAX` to use other ports. 
 [^2]: e.g. 9600-8-N-1 , PORT-NOT-STARTED, INVALID-PORT
 [^3]: Each port has one operation guard. A port function called again for the same port (for example from a timer,
       event handler or Ribbon callback while an earlier call is still running) is rejected rather than allowed to

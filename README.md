@@ -17,6 +17,19 @@ guard against re-entrant calls, cooperative cancellation, runtime error handling
 partial-write recovery, bounded receives, binary-safe `Byte()` transport, and corrected timing/error decoding.
 See [CHANGELOG.md](CHANGELOG.md) for the full list.
 
+> **Not yet validated on a real serial port.** The 2026 revisions have been compiled, and tested against a stubbed
+> harness, on 64-bit Office 2021 only. Before relying on them, run the [loopback test](Tests/README.md#loopback-test) on
+> the ports you will use, and test 32-bit Office separately if you use it. Until then, treat this revision as a
+> release candidate.
+>
+> **Upgrading from an earlier version?** Some behaviour changed. Check your macros for:
+> - short settings strings such as `"8N1"` or `"COM1"`, which used to be ignored and now make `start_com_port` fail
+> - `stop_com_port(port, drain)`, which can now return `False` and leave the port open
+> - `receive_com_port` calls on an idle port, which now wait for the read timer (about 100-500 mS) before
+>   returning empty
+>
+> The [CHANGELOG](CHANGELOG.md) lists every change.
+
 <details><summary>More Information</summary>
 <p>
    
@@ -48,9 +61,10 @@ New functions here are therefore a fresh start and are based largely on Microsof
 
 Originally developed on Windows 10 (64-Bit) with Microsoft Office 2019 Professional (32-Bit VBA7).
 
-Tested on Office 2016 Professional (64-bit VBA7) and Office 2019 Professional (32-Bit VBA7).
+The original 2022 code was tested on Office 2016 Professional (64-bit VBA7) and Office 2019 Professional (32-Bit VBA7).
 
-The 2026 hardened revision compiles clean on Office 2016+ (VBA7); Win32 `BOOL` results are declared `As Long`,
+The 2026 revisions compile clean on Office 16.0 (VBA7). The 2026-11 changes have only been compiled and tested on
+64-bit Office 2021, and not yet on a real port. Win32 `BOOL` results are declared `As Long`,
 native NULL pointers are passed as explicit `LongPtr` zeros, and a built-in `ABI_SELF_TEST` verifies structure
 sizes (`DCB=28, COMSTAT=12, COMMTIMEOUTS=20`) before the first port is opened on any host.
 
@@ -60,7 +74,10 @@ sizes (`DCB=28, COMSTAT=12, COMMTIMEOUTS=20`) before the first port is opened on
 <details><summary>COM Ports</summary>
 <p>
 
-Multiple com ports are supported, including physical hardware ports and synthetic virtual software ports. 
+Multiple com ports are supported, including physical hardware ports and synthetic virtual software ports.
+
+Each module accepts COM1 and COM2 only until you change `COM_PORT_MIN` and `COM_PORT_MAX` near the top of the
+module. A port outside that range is rejected as invalid.
 
 All read and write functions are synchronous, in part because not all serial port types support overlapped operation.
 
@@ -129,15 +146,23 @@ therefore has a non-blocking operation guard:
 </p>
 </details>  
 
-<details><summary>Compile test workbooks</summary>
+<details><summary>Testing</summary>
 <p>
 
-`SERIAL_PORT_TEST_MAIN.xlsm` and `SERIAL_PORT_TEST_NODEBUG.xlsm` contain the two modules imported and
-compiled on Office 16.0, with headless smoke tests passed (invalid port numbers only — no hardware touched).
+| Test | How to run | What it shows |
+|---|---|---|
+| Compile test workbooks | Open `SERIAL_PORT_TEST_MAIN.xlsm` or `SERIAL_PORT_TEST_NODEBUG.xlsm` | Each module compiles in Office. Their smoke tests used invalid port numbers only, so no port is touched. |
+| Unit harness | `pwsh -File Tests\run_tests.ps1` | Logic regressions. The Windows port calls are stubbed and the modules run against a temporary file. |
+| Loopback test | `pwsh -File Tests\run_loopback.ps1 -PortA 3` (add `-PortB 4` for a pair) | The real modules on a real or virtual port: settings, all 256 byte values, receive limits, a late reply, flow control and parity. |
 
-[Tests](Tests) holds a harness that runs both modules in Excel against a temporary file, with the Windows port
-calls stubbed. It catches logic regressions but says nothing about real hardware. It has only been run on 64-bit
-Office.
+**The loopback test is the only one that touches a real port, and it has not been run yet.** It is needed
+because the other two cannot show what a driver does: whether settings reach the port, whether a graceful stop
+really waits for queued data, whether parity errors are detected, or how timing behaves on the wire. Run it on
+each kind of port you use (a USB adapter can behave differently from a virtual pair), and on 32-bit Office if you
+use it. [Tests/README.md](Tests/README.md) has the wiring, the commands and how to read the results.
+
+The tests need desktop Excel with **Trust access to the VBA project object model** turned on, PowerShell 7, and
+Python 3 for the unit harness. So far they have only been run on 64-bit Office 2021.
 
 **Never import both modules into the same VBA project** — they share public names by design.
 
@@ -196,6 +221,8 @@ Office.
 [Port Signalling Functions](Functions/Function_List_Signalling.md)
 
 [Show Functions](Functions/Function_List_Show.md)
+
+[Helper Functions](Functions/Function_List_Helpers.md)
 
 Private functions are not intended to be called directly by users.
   

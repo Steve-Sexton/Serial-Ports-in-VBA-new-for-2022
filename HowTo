@@ -9,7 +9,15 @@ An 'intermediate' or better level of VBA and serial comms knowledge is assumed.
 Functions were developed on Windows 10 (64-Bit) and Office Professional 2019 (32-Bit).
 Tested on Office Professional 2016 (64-Bit) and Office Professional 2019 (32-Bit).
 Usage with other Windows and Office versions is untested.
-Follow testing steps below to check compatibility. 
+Follow testing steps below to check compatibility.
+
+The 2026 revision of the modules has not yet been validated on a real serial port.
+Before relying on it, run the automated loopback test in the Tests folder of this repo:
+    pwsh -File Tests\run_loopback.ps1 -DryRun     (checks the setup, opens no port)
+    pwsh -File Tests\run_loopback.ps1 -PortA 3    (one port with a loopback plug)
+    pwsh -File Tests\run_loopback.ps1 -PortA 3 -PortB 4    (a port pair)
+Tests/README.md explains the wiring and how to read the results.
+The manual steps below are still a useful check with a real device.
 
 Host PC should have a physical or virtual COM Port available for use. 
 COM Port 1 shown - change (1) below to another COM Port if required. 
